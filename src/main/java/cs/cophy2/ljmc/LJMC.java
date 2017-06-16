@@ -136,6 +136,9 @@ public class LJMC {
 		}
 	}
 	
+	/**
+	 * Initializes the system with randomly choosen positions.
+	 */
 	public static void initSystemRandomlyDistributed() {
 		particles = new ArrayList<double[]>(numParticles);
 		
@@ -148,6 +151,9 @@ public class LJMC {
 		}
 	}
 	
+	/**
+	 * Initializes the system distributing the particles frequently.
+	 */
 	public static void initSystemFrequentlyDistributed() {
 		particles = new ArrayList<double[]>(numParticles);
 		
