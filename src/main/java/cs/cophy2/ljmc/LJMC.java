@@ -3,10 +3,8 @@ package cs.cophy2.ljmc;
 import java.awt.Color;
 import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
-import java.io.IOException;
 import java.text.DecimalFormat;
 import java.text.NumberFormat;
 import java.util.ArrayList;
@@ -37,9 +35,6 @@ public class LJMC {
 	public static double density;
 	public static double beta;
 	
-	public static List<Double> acceptRates;
-	public static List<Double> energies;
-	
 	public static int printFreq;
 	public static int trjFreq;
 	
@@ -57,8 +52,6 @@ public class LJMC {
 		
 		nf.setMaximumFractionDigits(4);
 		nf.setMinimumFractionDigits(4);
-		acceptRates = new ArrayList<Double>();
-		energies = new ArrayList<Double>();
 		
 		try {
 			
@@ -131,22 +124,20 @@ public class LJMC {
 					particles.set(particleIndex, prevParticle);
 				}
 				
-				//Collect energies and acceptance rates
-				energies.add(energyTotal);
-				acceptRates.add(numAcceptSteps * 1.0 / (i+1));
-				
 				//Print progress
 				if (i % printFreq == 0)
 					System.out.print("\r" + (int)((i * 1.0 / numSteps) * 100) + "% ");
 			}
 			
+			
+			
+			
+			
+			
+			
+			
+			
 			//Results
-			System.out.println("\nFinal total energy = " + nf.format(energyTotal));
-			System.out.println("Avg. total energy = " + nf.format(calcAvgEnergy()));
-			plotEnergies();
-			System.out.println("Final acceptance rate = " + nf.format(numAcceptSteps * 1.0 / numSteps));
-			System.out.println("Avg. acceptance rate = " + nf.format(calcAvgAcceptRate()));
-			plotAcceptanceRate();
 			plotRadialDistribution();
 			plot2DSystemPeriodic();
 			
@@ -420,60 +411,6 @@ public class LJMC {
 	}
 	
 	/**
-	 * Plots the evolution of the total energy.
-	 */
-	public static void plotEnergies() {
-		@SuppressWarnings("unchecked")
-		DataTable data = new DataTable(Integer.class, Double.class);
-		for (int i = 0; i < energies.size(); i += 100 )
-			data.add(i, energies.get(i));
-		
-		XYPlot plot = new XYPlot(data);
-		plot.setInsets(new Insets2D.Double(70.0, 70.0, 70.0, 70.0));
-		plot.setBackground(Color.WHITE);
-		 plot.getPointRenderers(data).get(0).setShape(null);
-		LineRenderer lines = new DefaultLineRenderer2D();
-        plot.setLineRenderers(data, lines);
-        
-        plot.getTitle().setText("Total energy");
-		plot.getAxisRenderer(XYPlot.AXIS_X).getLabel().setText("Iteration");
-       
-		DrawableWriter writer = DrawableWriterFactory.getInstance().get("image/png");
-		try {
-			writer.write(plot, new FileOutputStream(new File(outDir + "/energy.png")), 800, 800);
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
-	}
-	
-	/**
-	 * Plots the evolution of the acceptance rate.
-	 */
-	public static void plotAcceptanceRate() {
-		@SuppressWarnings("unchecked")
-		DataTable data = new DataTable(Integer.class, Double.class);
-		for (int i = 0; i < acceptRates.size(); i += 100 )
-			data.add(i, acceptRates.get(i));
-		
-		XYPlot plot = new XYPlot(data);
-		plot.setInsets(new Insets2D.Double(70.0, 70.0, 70.0, 70.0));
-		plot.setBackground(Color.WHITE);
-		 plot.getPointRenderers(data).get(0).setShape(null);
-		LineRenderer lines = new DefaultLineRenderer2D();
-        plot.setLineRenderers(data, lines);
-        
-        plot.getTitle().setText("Acceptance rate");
-		plot.getAxisRenderer(XYPlot.AXIS_X).getLabel().setText("Iteration");
-       
-		DrawableWriter writer = DrawableWriterFactory.getInstance().get("image/png");
-		try {
-			writer.write(plot, new FileOutputStream(new File(outDir + "/ar.png")), 800, 800);
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
-	}
-	
-	/**
 	 * Calculates a histogram and exports a plot for the radial distribution function.
 	 */
 	public static void plotRadialDistribution() {
@@ -532,20 +469,6 @@ public class LJMC {
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
-	}
-	
-	public static double calcAvgEnergy() {
-		double sum = 0.0;
-		for (double e : energies)
-			sum += e;
-		return sum / numSteps;
-	}
-	
-	public static double calcAvgAcceptRate() {
-		double sum = 0.0;
-		for (double ar : acceptRates)
-			sum += ar;
-		return sum / numSteps;
 	}
 	
 	/**
