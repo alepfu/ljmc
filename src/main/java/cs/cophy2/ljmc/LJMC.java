@@ -73,7 +73,7 @@ public class LJMC {
 			
 			//Calculated parameters
 			boxLength = Math.pow(numParticles / density, 1.0 / numDim);
-			cutoff = 0.5 * boxLength;
+			cutoff = 2.5 * sigma;
 			beta = 1.0 / temp;
 			radius = 0.5 * sigma;
 			
@@ -94,29 +94,34 @@ public class LJMC {
 			initSystemFrequentlyDistributed();
 			writeTrajectory();
 			
-			//Calc initial energy
+			//Calc initial energy and virial
 			double energyTotal = calcEnergyTotal();
 			System.out.println("Initial energy = " + energyTotal);
+			double virialTotal = calcVirialTotal();
+			System.out.println("Initial virial = " + virialTotal);
 			
 			//MC loop
 			int numAcceptSteps = 0;
 			for (int i = 0; i < numSteps; i++) {
 				
-				//Choose a particle at random and calculate its energy
+				//Choose a particle at random and calculate its energy and virial
 				int particleIndex = rand.nextInt(numParticles);
 				double prevParticleEnergy = calcEnergyParticle(particleIndex);
+				double prevParticleVirial = calcVirialParticle(particleIndex);
 				
-				//Move the choosen particle and calculate the new energy of the particle
+				//Move the choosen particle and calculate the new energy and virial
 				double[] prevParticle = new double[numDim];
 				for (int j = 0; j < prevParticle.length; j++)
 					prevParticle[j] = particles.get(particleIndex)[j];
 				moveParticle(particleIndex);
 				double newParticleEnergy = calcEnergyParticle(particleIndex);
+				double newParticleVirial = calcVirialParticle(particleIndex);
 				
 				//Acceptance
 				double deltaParticleEnergy = newParticleEnergy - prevParticleEnergy;
 				if ((deltaParticleEnergy < 0) || (rand.nextDouble() < Math.exp(-beta * deltaParticleEnergy))) {
 					energyTotal += deltaParticleEnergy;
+					virialTotal += newParticleVirial - prevParticleVirial;
 					++numAcceptSteps;
 					
 					if (i % trjFreq == 0)
@@ -268,7 +273,7 @@ public class LJMC {
 		
 		//Tail correction
 		if (numDim == 3) {
-			double energyTailCorr = (8.0/3.0) * Math.PI * density * (  (1.0/3.0) * Math.pow(1.0/cutoff, 9) - Math.pow(1.0/cutoff, 3)  );
+			double energyTailCorr = (8.0/3.0) * Math.PI * density * epsilon * Math.pow(sigma, 3) * (  (1.0/3.0) * Math.pow(sigma/cutoff, 9) - Math.pow(sigma/cutoff, 3)  );
 			energyTotal += numParticles * energyTailCorr;
 		}
 		//TODO tail correction for 2D
@@ -307,6 +312,43 @@ public class LJMC {
 		//TODO shift correction for 2D
 		
 		return pot;
+	}
+	
+	/**
+	 * Calculates the virial of the system.
+	 */
+	public static double calcVirialTotal() {
+		double virialTotal = 0.0;
+		
+		for (int i = 0; i < numParticles; i++)
+			virialTotal += calcVirialParticle(i);
+
+		return 0.5 * virialTotal;
+	}
+	
+	/**
+	 * Calculates the virial of a single particle.
+	 */
+	public static double calcVirialParticle(int p) {
+		double virialParticle = 0.0;
+		
+		for (int j = 0; j < numParticles; j++) {
+			if (j != p) {
+				double dist = calcDist(p, j);
+				if (dist <= cutoff)
+					virialParticle += calcVirial(dist);
+			}
+		}
+		
+		return virialParticle;
+	}
+	
+	/**
+	 * Calculates the virial for a given distance
+	 */
+	public static double calcVirial(double dist) {
+		
+		return 48.0 * epsilon * (  Math.pow(sigma/dist, 12) - 0.5 * Math.pow(sigma/dist, 6)  );
 	}
 	
 	/**
