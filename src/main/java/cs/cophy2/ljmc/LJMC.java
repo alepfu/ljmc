@@ -32,8 +32,7 @@ public class LJMC {
 	public static int numSteps;				
 	public static double epsilon;			
 	public static double sigma;				
-    public static double trunc;				
-    public static double truncSq;
+    public static double cutoff;				
     public static double radius;			
 	public static double density;
 	public static double beta;
@@ -64,19 +63,18 @@ public class LJMC {
 		try {
 			
 			//Parameters
-			numDim = 2;
+			numDim = 3;
 			numParticles = 100;
 			epsilon = 5.0;							
 			sigma = 1.0;
 			temp = 1.0;
 			density = 0.2;
 			numSteps = 1000000;
-			trunc = 2.5 * sigma;
 			
 			//Calculated parameters
 			boxLength = Math.pow(numParticles / density, 1.0 / numDim);
+			cutoff = 0.5 * boxLength;
 			beta = 1.0 / temp;
-			truncSq = Math.pow(trunc, 2);
 			radius = 0.5 * sigma;
 			
 			//Output parameters
@@ -90,7 +88,7 @@ public class LJMC {
 			System.out.println("Temperature = " + nf.format(temp));
 			System.out.println("Density = " + nf.format(density));
 			System.out.println("Box length = " + nf.format(boxLength));
-			System.out.println("Dist. truncation = " + nf.format(trunc));
+			System.out.println("Dist. cutoff = " + nf.format(cutoff));
 			
 			//Initialize system
 			initSystemFrequentlyDistributed();
@@ -128,10 +126,8 @@ public class LJMC {
 					particles.set(particleIndex, prevParticle);
 				}
 				
-				//Collect the total energies
+				//Collect energies and acceptance rates
 				energies.add(energyTotal);
-				
-				//Calc and collect acceptance rates
 				acceptRates.add(numAcceptSteps * 1.0 / (i+1));
 				
 				//Print progress
@@ -263,12 +259,21 @@ public class LJMC {
 	 * Calculates the energy of the system.
 	 */
 	public static double calcEnergyTotal() {
-		double energySystem = 0.0;
+		double energyTotal = 0.0;
 		
 		for (int i = 0; i < numParticles; i++)
-			energySystem += calcEnergyParticle(i);
+			energyTotal += calcEnergyParticle(i);
 		
-		return 0.5 * energySystem;
+		energyTotal = 0.5 * energyTotal;
+		
+		//Tail correction
+		if (numDim == 3) {
+			double energyTailCorr = (8.0/3.0) * Math.PI * density * (  (1.0/3.0) * Math.pow(1.0/cutoff, 9) - Math.pow(1.0/cutoff, 3)  );
+			energyTotal += numParticles * energyTailCorr;
+		}
+		//TODO tail correction for 2D
+		
+		return energyTotal;
 	}
 
 	/**
@@ -280,7 +285,7 @@ public class LJMC {
 		for (int j = 0; j < numParticles; j++) {
 			if (j != p) {
 				double dist = calcDist(p, j);
-				if (dist <= trunc)
+				if (dist <= cutoff)
 					energyParticle += calcLJPotential(dist);
 			}
 		}
@@ -290,11 +295,18 @@ public class LJMC {
 	
 	/**
 	 * Calculates the Lennard-Jones potential for a given distance.
-	 * U(r) = 4 * epsilon * [ (sigma/r)^12 - (sigma/r)^6 ]
 	 */
 	public static double calcLJPotential(double dist) {
 		
-		return 4.0 * epsilon * (  Math.pow(sigma / dist, 12) - Math.pow(sigma / dist, 6)  );
+		double pot = 4.0 * epsilon * (  Math.pow(sigma / dist, 12) - Math.pow(sigma / dist, 6)  ); 
+		
+		if (numDim == 3) {
+			double energyShiftCorr = 4.0 * epsilon * (  Math.pow(sigma / cutoff, 12) - Math.pow(sigma / cutoff, 6)  ) ;
+			pot -= energyShiftCorr;
+		}
+		//TODO shift correction for 2D
+		
+		return pot;
 	}
 	
 	/**
