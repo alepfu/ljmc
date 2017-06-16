@@ -36,6 +36,9 @@ public class LJMC {
 	public static double density;
 	public static double beta;
 	
+	public static List<Double> acceptRates;
+	public static List<Double> energies;
+	
 	public static int printFreq;
 	public static int trjFreq;
 	
@@ -51,20 +54,22 @@ public class LJMC {
 	 */
 	public static void main(String[] args) {
 		
-		nf.setMaximumFractionDigits(3);
-		nf.setMinimumFractionDigits(3);
+		nf.setMaximumFractionDigits(4);
+		nf.setMinimumFractionDigits(4);
+		acceptRates = new ArrayList<Double>();
+		energies = new ArrayList<Double>();
 		
 		try {
 			
 			//Parameters
 			numDim = 2;
-			numParticles = (int) Math.pow(4, numDim);
+			numParticles = (int) Math.pow(10, numDim);
 			epsilon = 5.0;							
 			sigma = 1.0;
 			radius = 0.5 * sigma;			
-			numSteps = 10000000;
+			numSteps = 1000000;
 			printFreq = (int) (numSteps * 0.01);
-			trjFreq = 1; //(int) (numSteps * 0.01);
+			trjFreq = (int) (numSteps * 0.00001);
 			temp = 1.0;
 			beta = 1.0 / temp;
 			density = 0.1;
@@ -89,10 +94,8 @@ public class LJMC {
 			double energy = calcEnergySystem();
 			System.out.println("Initial energy = " + energy);
 			
-			calcRDF("start");
-			
 			//MC loop
-			int acceptedSteps = 0;
+			int numAcceptSteps = 0;
 			for (int i = 0; i < numSteps; i++) {
 				
 				//Choose a particle at random and calculate its energy
@@ -106,12 +109,11 @@ public class LJMC {
 				moveParticle(particleIndex);
 				double newEnergy = calcEnergyParticle(particleIndex);
 				
-				//Accept the new configuration with a probability
+				//Acceptance
 				double deltaEnergy = newEnergy - prevEnergy;
-				
 				if ((deltaEnergy < 0) || (rand.nextDouble() < Math.exp(-beta * deltaEnergy))) {
 					energy += deltaEnergy;
-					++acceptedSteps;
+					++numAcceptSteps;
 					
 					if (i % trjFreq == 0)
 						writeTrajectory();
@@ -120,42 +122,29 @@ public class LJMC {
 					particles.set(particleIndex, prevParticle);
 				}
 				
-				/*if (deltaEnergy < 0) {
-					energy += deltaEnergy;
-					++acceptedSteps;
-					
-					if (i % trjFreq == 0)
-						writeTrajectory();
-				}
-				else {
-					double prob = rand.nextDouble();
-					if (prob < Math.exp(-beta * deltaEnergy)) {
-						energy += deltaEnergy;
-						++acceptedSteps;
-						
-						if (i % trjFreq == 0)
-							writeTrajectory();
-						
-					} else {
-						particles.set(particleIndex, prevParticle);
-					}
-				}*/
+				//Collect the total energies
+				energies.add(energy);
+				
+				//Calc and collect acceptance rates
+				acceptRates.add(numAcceptSteps * 1.0 / (i+1));
 				
 				//Print progress
 				if (i % printFreq == 0)
-					System.out.print("\r" + (int)((i * 1.0 / numSteps) * 100) + "%");
+					System.out.print("\r" + (int)((i * 1.0 / numSteps) * 100) + "% ");
 			}
 			
-			//Log results
-			System.out.println("\nFinal energy = " + energy);
-			System.out.println("Acceptance rate = " + nf.format(acceptedSteps * 1.0 / numSteps));
-			
-			
-			calcRDF("end");
+			//Results
+			System.out.println("\nFinal total energy = " + nf.format(energy));
+			System.out.println("Avg. total energy = " + nf.format(calcAvgEnergy()));
+			plotEnergies();
+			System.out.println("Final acceptance rate = " + nf.format(numAcceptSteps * 1.0 / numSteps));
+			System.out.println("Avg. acceptance rate = " + nf.format(calcAvgAcceptRate()));
+			plotAcceptanceRate();
+			plotRadialDistribution();
+
 			
 			
 			trjWriter.close();
-			
 			System.out.println("\nFinished.");
 			
 		} catch (Exception e) {
@@ -342,6 +331,9 @@ public class LJMC {
 		return dist;
 	}
 	
+	/**
+	 * Writes the positions to a trajectory file readable by VMD.
+	 */
 	public static void writeTrajectory() {
 		try {
 			//Initialize writer and write header information
@@ -368,14 +360,69 @@ public class LJMC {
 	}
 	
 	/**
+	 * Plots the evolution of the total energy.
+	 */
+	public static void plotEnergies() {
+		@SuppressWarnings("unchecked")
+		DataTable data = new DataTable(Integer.class, Double.class);
+		for (int i = 0; i < energies.size(); i += 100 )
+			data.add(i, energies.get(i));
+		
+		XYPlot plot = new XYPlot(data);
+		plot.setInsets(new Insets2D.Double(70.0, 70.0, 70.0, 70.0));
+		plot.setBackground(Color.WHITE);
+		 plot.getPointRenderers(data).get(0).setShape(null);
+		LineRenderer lines = new DefaultLineRenderer2D();
+        plot.setLineRenderers(data, lines);
+        
+        plot.getTitle().setText("Total energy");
+		plot.getAxisRenderer(XYPlot.AXIS_X).getLabel().setText("Iteration");
+       
+		DrawableWriter writer = DrawableWriterFactory.getInstance().get("image/png");
+		try {
+			writer.write(plot, new FileOutputStream(new File(outDir + "/energy.png")), 800, 800);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+	
+	/**
+	 * Plots the evolution of the acceptance rate.
+	 */
+	public static void plotAcceptanceRate() {
+		@SuppressWarnings("unchecked")
+		DataTable data = new DataTable(Integer.class, Double.class);
+		for (int i = 0; i < acceptRates.size(); i += 100 )
+			data.add(i, acceptRates.get(i));
+		
+		XYPlot plot = new XYPlot(data);
+		plot.setInsets(new Insets2D.Double(70.0, 70.0, 70.0, 70.0));
+		plot.setBackground(Color.WHITE);
+		 plot.getPointRenderers(data).get(0).setShape(null);
+		LineRenderer lines = new DefaultLineRenderer2D();
+        plot.setLineRenderers(data, lines);
+        
+        plot.getTitle().setText("Acceptance rate");
+		plot.getAxisRenderer(XYPlot.AXIS_X).getLabel().setText("Iteration");
+       
+		DrawableWriter writer = DrawableWriterFactory.getInstance().get("image/png");
+		try {
+			writer.write(plot, new FileOutputStream(new File(outDir + "/ar.png")), 800, 800);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+	
+	/**
 	 * Calculates a histogram and exports a plot for the radial distribution function.
 	 */
-	public static void calcRDF(String plotLabel) {
+	public static void plotRadialDistribution() {
 		
 		int numBins = 100;
-		double max = boxLength;
+		double max = 5.0 * sigma;  //0.5 * boxLength;
 		double[] hist = new double[numBins];
 		double binSize = max / numBins;
+		
 		for (int i = 0; i < (numParticles - 1); i++)  {
         	for (int j = i + 1; j < numParticles; j++) {
         		double r = calcDist(i, j);
@@ -387,11 +434,20 @@ public class LJMC {
         	}
 		}
 		
-		for (int i = 0; i < numBins; i++) {
-			double r = binSize * (i + 0.5);
-			double vb = (Math.pow(i+1, 3) - Math.pow(i, 3)) * Math.pow(binSize, 3);
-			double nid = (4.0/3.0) * Math.PI * vb * r;   //Fehler im Buch??
-			hist[i] = hist[i] / (numParticles * nid);
+		if (numDim == 3) {
+			for (int i = 0; i < numBins; i++) {
+				double vb = (Math.pow(i+1, 3) - Math.pow(i, 3)) * Math.pow(binSize, 3);
+				double nid = (4.0/3.0) * Math.PI * vb * density;
+				hist[i] = hist[i] / (numParticles * nid);
+			}
+		}
+		
+		if (numDim == 2) {
+			for (int i = 0; i < numBins; i++) {
+				double vb = (Math.pow(i+1, 2) - Math.pow(i, 2)) * Math.pow(binSize, 2);
+				double nid = Math.PI * vb * density;
+				hist[i] = hist[i] / (numParticles * nid);
+			}
 		}
 		
 		//Plotting
@@ -407,16 +463,28 @@ public class LJMC {
 		LineRenderer lines = new DefaultLineRenderer2D();
         plot.setLineRenderers(data, lines);
         
-        plot.getTitle().setText("Radial Distribution Function");
+        plot.getTitle().setText("Radial Distribution");
 		plot.getAxisRenderer(XYPlot.AXIS_X).getLabel().setText("r");
-		plot.getAxisRenderer(XYPlot.AXIS_Y).getLabel().setText("g(r)");
        
 		DrawableWriter writer = DrawableWriterFactory.getInstance().get("image/png");
 		try {
-			writer.write(plot, new FileOutputStream(new File(outDir + "/rdf_" + plotLabel +".png")), 800, 800);
+			writer.write(plot, new FileOutputStream(new File(outDir + "/rdf.png")), 800, 800);
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
 	}
-
+	
+	public static double calcAvgEnergy() {
+		double sum = 0.0;
+		for (double e : energies)
+			sum += e;
+		return sum / numSteps;
+	}
+	
+	public static double calcAvgAcceptRate() {
+		double sum = 0.0;
+		for (double ar : acceptRates)
+			sum += ar;
+		return sum / numSteps;
+	}
 }
