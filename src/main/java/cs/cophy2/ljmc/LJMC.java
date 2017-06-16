@@ -3,8 +3,10 @@ package cs.cophy2.ljmc;
 import java.awt.Color;
 import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
+import java.io.IOException;
 import java.text.DecimalFormat;
 import java.text.NumberFormat;
 import java.util.ArrayList;
@@ -63,19 +65,23 @@ public class LJMC {
 			
 			//Parameters
 			numDim = 2;
-			numParticles = (int) Math.pow(10, numDim);
+			numParticles = 100;
 			epsilon = 5.0;							
 			sigma = 1.0;
-			radius = 0.5 * sigma;			
+			temp = 1.0;
+			density = 0.2;
 			numSteps = 1000000;
+			trunc = 2.5 * sigma;
+			
+			//Calculated parameters
+			boxLength = Math.pow(numParticles / density, 1.0 / numDim);
+			beta = 1.0 / temp;
+			truncSq = Math.pow(trunc, 2);
+			radius = 0.5 * sigma;
+			
+			//Output parameters
 			printFreq = (int) (numSteps * 0.01);
 			trjFreq = (int) (numSteps * 0.00001);
-			temp = 1.0;
-			beta = 1.0 / temp;
-			density = 0.1;
-			boxLength = Math.pow(numParticles / density, 1.0 / numDim);
-			trunc = 2.5 * sigma;
-			truncSq = Math.pow(trunc, 2);
 			
 			//Log parameters
 			System.out.println("Num. dimensions = " + numDim);
@@ -91,8 +97,8 @@ public class LJMC {
 			writeTrajectory();
 			
 			//Calc initial energy
-			double energy = calcEnergySystem();
-			System.out.println("Initial energy = " + energy);
+			double energyTotal = calcEnergyTotal();
+			System.out.println("Initial energy = " + energyTotal);
 			
 			//MC loop
 			int numAcceptSteps = 0;
@@ -100,19 +106,19 @@ public class LJMC {
 				
 				//Choose a particle at random and calculate its energy
 				int particleIndex = rand.nextInt(numParticles);
-				double prevEnergy = calcEnergyParticle(particleIndex);
+				double prevParticleEnergy = calcEnergyParticle(particleIndex);
 				
 				//Move the choosen particle and calculate the new energy of the particle
 				double[] prevParticle = new double[numDim];
 				for (int j = 0; j < prevParticle.length; j++)
 					prevParticle[j] = particles.get(particleIndex)[j];
 				moveParticle(particleIndex);
-				double newEnergy = calcEnergyParticle(particleIndex);
+				double newParticleEnergy = calcEnergyParticle(particleIndex);
 				
 				//Acceptance
-				double deltaEnergy = newEnergy - prevEnergy;
-				if ((deltaEnergy < 0) || (rand.nextDouble() < Math.exp(-beta * deltaEnergy))) {
-					energy += deltaEnergy;
+				double deltaParticleEnergy = newParticleEnergy - prevParticleEnergy;
+				if ((deltaParticleEnergy < 0) || (rand.nextDouble() < Math.exp(-beta * deltaParticleEnergy))) {
+					energyTotal += deltaParticleEnergy;
 					++numAcceptSteps;
 					
 					if (i % trjFreq == 0)
@@ -123,7 +129,7 @@ public class LJMC {
 				}
 				
 				//Collect the total energies
-				energies.add(energy);
+				energies.add(energyTotal);
 				
 				//Calc and collect acceptance rates
 				acceptRates.add(numAcceptSteps * 1.0 / (i+1));
@@ -134,14 +140,14 @@ public class LJMC {
 			}
 			
 			//Results
-			System.out.println("\nFinal total energy = " + nf.format(energy));
+			System.out.println("\nFinal total energy = " + nf.format(energyTotal));
 			System.out.println("Avg. total energy = " + nf.format(calcAvgEnergy()));
 			plotEnergies();
 			System.out.println("Final acceptance rate = " + nf.format(numAcceptSteps * 1.0 / numSteps));
 			System.out.println("Avg. acceptance rate = " + nf.format(calcAvgAcceptRate()));
 			plotAcceptanceRate();
 			plotRadialDistribution();
-
+			plot2DSystemPeriodic();
 			
 			
 			trjWriter.close();
@@ -256,7 +262,7 @@ public class LJMC {
 	/**
 	 * Calculates the energy of the system.
 	 */
-	public static double calcEnergySystem() {
+	public static double calcEnergyTotal() {
 		double energySystem = 0.0;
 		
 		for (int i = 0; i < numParticles; i++)
@@ -486,5 +492,41 @@ public class LJMC {
 		for (double ar : acceptRates)
 			sum += ar;
 		return sum / numSteps;
+	}
+	
+	/**
+	 * Plots a 2D system with its periodic images.
+	 */
+	public static void plot2DSystemPeriodic() {
+		
+		if (numDim == 2) {
+		
+			@SuppressWarnings("unchecked")
+			DataTable dataTable = new DataTable(Double.class, Double.class);
+			
+			for (double[] p : particles) {
+				dataTable.add(p[0], p[1]);
+				dataTable.add(p[0] - boxLength, p[1]);
+				dataTable.add(p[0] + boxLength, p[1]);
+				dataTable.add(p[0], p[1] - boxLength);
+				dataTable.add(p[0], p[1] + boxLength);
+				dataTable.add(p[0] - boxLength, p[1] - boxLength);
+				dataTable.add(p[0] + boxLength, p[1] + boxLength);
+				dataTable.add(p[0] - boxLength, p[1] + boxLength);
+				dataTable.add(p[0] + boxLength, p[1] - boxLength);
+			}
+
+			XYPlot plot = new XYPlot(dataTable);
+			double margin = 0.25 * boxLength;			
+			plot.getAxis(XYPlot.AXIS_X).setRange(-margin - boxLength, boxLength * 2 + margin);
+			plot.getAxis(XYPlot.AXIS_Y).setRange(-margin - boxLength, boxLength * 2 + margin);
+			
+			DrawableWriter writer = DrawableWriterFactory.getInstance().get("image/png");
+			try {
+				writer.write(plot, new FileOutputStream(new File(outDir + "/system_2D.png")), 800, 800);
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+		}
 	}
 }
