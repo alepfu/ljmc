@@ -3,7 +3,6 @@ package cs.cophy2.ljmc;
 import java.awt.Color;
 import java.io.BufferedWriter;
 import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -12,12 +11,6 @@ import java.text.NumberFormat;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
-
-import org.apache.commons.cli.CommandLine;
-import org.apache.commons.cli.CommandLineParser;
-import org.apache.commons.cli.DefaultParser;
-import org.apache.commons.cli.Options;
-import org.apache.commons.cli.ParseException;
 
 import de.erichseifert.gral.data.DataTable;
 import de.erichseifert.gral.graphics.Insets2D;
@@ -30,23 +23,29 @@ import de.erichseifert.gral.plots.lines.LineRenderer;
 
 public class LJMC {
 
-	public static int numParticles;			//Number of particles
-	public static double boxLength;			//Box length, has to be even
-	public static List<double[]> particles;	//Positions of the particles
-	public static double energy;			//Energy of system
-	public static double temp;				//Temperature
-	public static int numSteps;				//Number of MC steps to do
-	public static double epsilon;			//Epsilon
-	public static double sigma;				//Sigma
-    public static double trunc;				//Truncation for interactions
-	public static double radius;			//Radius of the spheres
+	public static int numParticles;			
+	public static double boxLength;			
+	public static List<double[]> particles;	
+	public static double energy;			
+	public static double temp;				
+	public static int numSteps;				
+	public static double epsilon;			
+	public static double sigma;				
+    public static double trunc;				
+    public static double truncSq;
+    public static double radius;			
 	public static double density;
+	public static double beta;
+	
+	public static int printFreq;
+	public static int trjFreq;
 	
 	public static long seed = 123;
 	public static Random rand = new Random(seed);
 	public static NumberFormat nf = DecimalFormat.getInstance();
 	public static String outDir = "/home/alepfu/Desktop/LJMC";
 	public static String outSuffix = "";
+	public static BufferedWriter trjWriter;
 	
 	/**
 	 * Monte Carlo simulation of Lennard-Jones Particles.
@@ -62,83 +61,72 @@ public class LJMC {
 			numParticles = 50;
 			epsilon = 5.0;			//1.0 to 10.0 (no to strong interaction)
 			sigma = 1.0;
-			trunc = 3 * sigma;
-			numSteps = 10000000;
-			temp = 0.85;
-			density = 0.1;
+			radius = 0.5 * sigma;			
+			numSteps = 1000000;
+			printFreq = 10000;
+			trjFreq = 10000;
+			temp = 2.0;
+			beta = 1.0 / temp;
+			density = 0.15;
 			boxLength = Math.cbrt(numParticles / density);
-			radius = sigma / 2.0;
+			System.out.println("Box length = " + nf.format(boxLength));
+			trunc = 0.5 * boxLength; //3.0 * sigma;
+			truncSq = Math.pow(trunc, 2);
 			
 			//Initialize system
-			particles = new ArrayList<double[]>(numParticles);
-			for (int i = 0; i < numParticles; i++) {
-				double[] pos = new double[3];		
-				for (int j = 0; j < pos.length; j++)
-					pos[j] = rand.nextDouble() * boxLength;
-				particles.add(pos);
-			}
-			
-			calcRDF("start");
-			
-			//Write initial configuration to trajectory file
-			BufferedWriter trajectoryWriter = new BufferedWriter(new FileWriter(outDir + "/ljmc.vtf"));
-			trajectoryWriter.write("pbc " + boxLength + " " + boxLength + " " + boxLength +"\n" + 
-								   "atom 0:" + (numParticles-1) + " radius " + radius + " name O type 0\n");
-			trajectoryWriter.write("\ntimestep ordered\n");
-			for (double[] x : particles) 
-				trajectoryWriter.write(x[0] + " " + x[1] + " " + x[2] + "\n");
+			initSystemFrequentlyDistributed();
 			
 			//Calc initial energy
-			double energy = calcEnergy();
+			double energy = calcEnergySystem();
 			System.out.println("Initial energy = " + energy);
+			System.out.println("Initial avg. energy = " + (energy / numParticles));
+			
+			calcRDF("start");
 			
 			//MC loop
 			int acceptedSteps = 0;
 			for (int i = 0; i < numSteps; i++) {
 				
-				//Choose a particle at random and calcuate its energy
+				//Write sytem to trajectory file
+				if (i % trjFreq == 0)
+					writeTrajectory();
+				
+				//Choose a particle at random and calculate its energy
 				int particle = rand.nextInt(numParticles);
-				double prevEnergy = calcEnergy(particle);
+				double prevEnergy = calcEnergyParticle(particle);
 				
 				//Move the choosen particle and calculate the new energy of the particle
 				double[] prevParticle = particles.get(particle).clone();
 				moveParticle(particle);
-				double newEnergy = calcEnergy(particle);
+				double newEnergy = calcEnergyParticle(particle);
 				
 				//Accept the new configuration with a probability corresponding to Boltzmann statistics
 				double deltaEnergy = newEnergy - prevEnergy;
-				boolean accept = false;
-				if (deltaEnergy < 0) 
-					accept = true;
-				else {
-					double prob = rand.nextDouble();
-					if (Math.exp(-deltaEnergy / temp) > prob)
-						accept = true;
-					else
-						particles.set(particle, prevParticle);  //Don't move, reset configuration
-				}
-				
-				//Update energy if move accepted
-				if (accept) {
+				if (deltaEnergy < 0) {
 					energy += deltaEnergy;
 					++acceptedSteps;
 				}
+				else {
+					double prob = rand.nextDouble();
+					if (prob < Math.exp(-beta * deltaEnergy)) {
+						energy += deltaEnergy;
+						++acceptedSteps;
+					} else {
+						particles.set(particle, prevParticle);  //Don't move, reset configuration
+					}
+				}
+				
+				//Print progress
+				if (i % printFreq == 0)
+					System.out.print("\r" + nf.format((i * 1.0 / numSteps)*100) + "%");
 			}
 			
-			System.out.println("Final energy = " + energy);
+			System.out.println("\nFinal energy = " + energy);
+			System.out.println("Final avg. energy = " + (energy / numParticles));
 			System.out.println("Acceptance rate = " + nf.format(acceptedSteps * 1.0 / numSteps));
-			
-			//Write end configuraton to trajectory file
-			trajectoryWriter.write("\ntimestep ordered\n");
-			for (double[] x : particles) 
-				trajectoryWriter.write(x[0] + " " + x[1] + " " + x[2] + "\n");
-			trajectoryWriter.flush();
-			trajectoryWriter.close();
-			
 			
 			
 			calcRDF("end");
-			
 			
 			
 			System.out.println("Finished.");
@@ -148,13 +136,56 @@ public class LJMC {
 		}
 	}
 	
+	public static void initSystemRandomlyDistributed() {
+		particles = new ArrayList<double[]>(numParticles);
+		
+		//Get particle positions randomly
+		for (int i = 0; i < numParticles; i++) {
+			double[] pos = new double[3];		
+			for (int j = 0; j < pos.length; j++)
+				pos[j] = rand.nextDouble() * boxLength;
+			particles.add(pos);
+		}
+	}
+	
+	public static void initSystemFrequentlyDistributed() {
+		particles = new ArrayList<double[]>(numParticles);
+		
+		//Get number of partitions for the lowest perfect cube
+		int numPart = 2;
+        while (Math.pow(numPart, 3) < numParticles)
+            numPart = numPart + 1;
+
+        //Get particle positions by advancing an index
+        int[] index = {0, 0, 0};
+		for (int i = 0; i < numParticles; i++) {
+			
+			double[] pos = new double[3];		
+			for (int j = 0; j < pos.length; j++)
+				pos[j] = (index[j] + radius) * (boxLength / numPart);
+			particles.add(pos);
+	
+			index[0] = index[0] + 1;
+			if (index[0] == numPart) {
+				index[0] = 0;
+				index[1] = index[1] + 1;
+				if (index[1] == numPart) {
+					index[1] = 0;
+					index[2] = index[2] + 1;
+				}
+			}
+		}
+	}
+	
 	/**
 	 * Moves a particle at random with applying PBC.
 	 */
 	public static void moveParticle(int p) {
+		
 		particles.get(p)[0] += rand.nextDouble() * 2 - 1;
 		particles.get(p)[1] += rand.nextDouble() * 2 - 1;
 		particles.get(p)[2] += rand.nextDouble() * 2 - 1;
+		
 		if (particles.get(p)[0] > boxLength) particles.get(p)[0] -= boxLength;
 		if (particles.get(p)[0] < 0) particles.get(p)[0] += boxLength;
 		if (particles.get(p)[1] > boxLength) particles.get(p)[1] -= boxLength;
@@ -166,37 +197,35 @@ public class LJMC {
 	/**
 	 * Calculates the energy of the system.
 	 */
-	public static double calcEnergy() {
+	public static double calcEnergySystem() {
 		double energy = 0.0;
 		for (int i = 0; i < (numParticles-1); i++) {
 			for (int j = i + 1; j < numParticles; j++) {
 				double distSq = calcSquaredDistance(i, j);
-				if (distSq <= Math.pow(trunc, 2))
-					energy += 4 * epsilon * (1 / Math.pow(distSq, 6)) - (1 / Math.pow(distSq, 3))  ;
+				if (distSq <= truncSq)
+					energy += 4 * epsilon * (  Math.pow(sigma / distSq, 6)) - (Math.pow(sigma / distSq, 3)  );
 			}
 		}
 		return energy;
 	}
-	
+
 	/**
 	 * Calculates the energy of a single particle.
 	 */
-	public static double calcEnergy(int p) {
-		double energy = 0.0;
-		int i = 0;
+	public static double calcEnergyParticle(int p) {
+		double energyParticle = 0.0;
 		for (int j = 0; j < numParticles; j++) {
-			if (i != p) {
+			if (j != p) {
 				double distSq = calcSquaredDistance(p, j);
-				if (distSq <= Math.pow(trunc, 2))
-					energy += 4 * epsilon * (1 / Math.pow(distSq, 6)) - (1 / Math.pow(distSq, 3))  ;
+				if (distSq <= truncSq)
+					energyParticle += 4 * epsilon * (  Math.pow(sigma / distSq, 6)) - (Math.pow(sigma / distSq, 3)  );
 			}
-			i++;
 		}
-		return energy;
+		return energyParticle;
 	}
 	
 	/**
-	 * Calculates the squared distances between two particles,
+	 * Calculates the squared distance between two particles,
 	 * restricting to the minimum image ("wrapping distances").
 	 */
 	public static double calcSquaredDistance(int i, int j) {
@@ -215,19 +244,37 @@ public class LJMC {
 	}
 	
 	/**
-	 * Calculates the distances between two particles,
+	 * Calculates the distance between two particles,
 	 * restricting to the minimum image ("wrapping distances").
 	 */
 	public static double calcDistance(int i, int j) {
 		return Math.sqrt(calcSquaredDistance(i, j));
 	}
 	
+	public static void writeTrajectory() {
+		try {
+			//Initialize writer and write header information
+			if (trjWriter == null) {
+				trjWriter =  new BufferedWriter(new FileWriter(outDir + "/ljmc.vtf"));
+				trjWriter.write("pbc " + boxLength + " " + boxLength + " " + boxLength +"\n" + 
+						   "atom 0:" + (numParticles-1) + " radius " + radius + " name O type 0\n");
+			}
+			
+			//Write system to file
+			trjWriter.write("\ntimestep ordered\n");
+			for (double[] x : particles) 
+				trjWriter.write(x[0] + " " + x[1] + " " + x[2] + "\n");
+			
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+	}
+	
 	/**
 	 * Calculates a histogram and exports a plot for the radial distribution function.
 	 */
-	public static void calcRDF(String suffix) {
+	public static void calcRDF(String plotLabel) {
 		
-		System.out.println("Calculating RDF ...");
 		int numBins = 200;
 		double max = 0.5 * boxLength;
 		double[] hist = new double[numBins];
@@ -269,7 +316,7 @@ public class LJMC {
        
 		DrawableWriter writer = DrawableWriterFactory.getInstance().get("image/png");
 		try {
-			writer.write(plot, new FileOutputStream(new File(outDir + "/rdf_" + suffix +".png")), 800, 800);
+			writer.write(plot, new FileOutputStream(new File(outDir + "/rdf_" + plotLabel +".png")), 800, 800);
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
