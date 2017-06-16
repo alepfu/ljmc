@@ -5,7 +5,6 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
-import java.io.IOException;
 import java.text.DecimalFormat;
 import java.text.NumberFormat;
 import java.util.ArrayList;
@@ -23,10 +22,10 @@ import de.erichseifert.gral.plots.lines.LineRenderer;
 
 public class LJMC {
 
+	public static int numDim;
 	public static int numParticles;			
 	public static double boxLength;			
-	public static List<double[]> particles;	
-	public static double energy;			
+	public static List<double[]> particles;			
 	public static double temp;				
 	public static int numSteps;				
 	public static double epsilon;			
@@ -52,34 +51,43 @@ public class LJMC {
 	 */
 	public static void main(String[] args) {
 		
-		nf.setMaximumFractionDigits(2);
-		nf.setMinimumFractionDigits(2);
+		nf.setMaximumFractionDigits(3);
+		nf.setMinimumFractionDigits(3);
 		
 		try {
 			
 			//Parameters
-			numParticles = 50;
-			epsilon = 5.0;			//1.0 to 10.0 (no to strong interaction)
+			numDim = 2;
+			numParticles = (int) Math.pow(4, numDim);
+			epsilon = 5.0;							
 			sigma = 1.0;
 			radius = 0.5 * sigma;			
-			numSteps = 1000000;
-			printFreq = 10000;
-			trjFreq = 10000;
-			temp = 2.0;
+			numSteps = 10000000;
+			printFreq = (int) (numSteps * 0.01);
+			trjFreq = 1; //(int) (numSteps * 0.01);
+			temp = 1.0;
 			beta = 1.0 / temp;
-			density = 0.15;
-			boxLength = Math.cbrt(numParticles / density);
-			System.out.println("Box length = " + nf.format(boxLength));
-			trunc = 0.5 * boxLength; //3.0 * sigma;
+			density = 0.1;
+			boxLength = Math.pow(numParticles / density, 1.0 / numDim);
+			trunc = 2.5 * sigma;
 			truncSq = Math.pow(trunc, 2);
+			
+			//Log parameters
+			System.out.println("Num. dimensions = " + numDim);
+			System.out.println("Num. particles = " + numParticles);
+			System.out.println("Epsilon = " + nf.format(epsilon));
+			System.out.println("Temperature = " + nf.format(temp));
+			System.out.println("Density = " + nf.format(density));
+			System.out.println("Box length = " + nf.format(boxLength));
+			System.out.println("Dist. truncation = " + nf.format(trunc));
 			
 			//Initialize system
 			initSystemFrequentlyDistributed();
+			writeTrajectory();
 			
 			//Calc initial energy
 			double energy = calcEnergySystem();
 			System.out.println("Initial energy = " + energy);
-			System.out.println("Initial avg. energy = " + (energy / numParticles));
 			
 			calcRDF("start");
 			
@@ -87,49 +95,68 @@ public class LJMC {
 			int acceptedSteps = 0;
 			for (int i = 0; i < numSteps; i++) {
 				
-				//Write sytem to trajectory file
-				if (i % trjFreq == 0)
-					writeTrajectory();
-				
 				//Choose a particle at random and calculate its energy
-				int particle = rand.nextInt(numParticles);
-				double prevEnergy = calcEnergyParticle(particle);
+				int particleIndex = rand.nextInt(numParticles);
+				double prevEnergy = calcEnergyParticle(particleIndex);
 				
 				//Move the choosen particle and calculate the new energy of the particle
-				double[] prevParticle = particles.get(particle).clone();
-				moveParticle(particle);
-				double newEnergy = calcEnergyParticle(particle);
+				double[] prevParticle = new double[numDim];
+				for (int j = 0; j < prevParticle.length; j++)
+					prevParticle[j] = particles.get(particleIndex)[j];
+				moveParticle(particleIndex);
+				double newEnergy = calcEnergyParticle(particleIndex);
 				
-				//Accept the new configuration with a probability corresponding to Boltzmann statistics
+				//Accept the new configuration with a probability
 				double deltaEnergy = newEnergy - prevEnergy;
-				if (deltaEnergy < 0) {
+				
+				if ((deltaEnergy < 0) || (rand.nextDouble() < Math.exp(-beta * deltaEnergy))) {
 					energy += deltaEnergy;
 					++acceptedSteps;
+					
+					if (i % trjFreq == 0)
+						writeTrajectory();
+					
+				} else {
+					particles.set(particleIndex, prevParticle);
+				}
+				
+				/*if (deltaEnergy < 0) {
+					energy += deltaEnergy;
+					++acceptedSteps;
+					
+					if (i % trjFreq == 0)
+						writeTrajectory();
 				}
 				else {
 					double prob = rand.nextDouble();
 					if (prob < Math.exp(-beta * deltaEnergy)) {
 						energy += deltaEnergy;
 						++acceptedSteps;
+						
+						if (i % trjFreq == 0)
+							writeTrajectory();
+						
 					} else {
-						particles.set(particle, prevParticle);  //Don't move, reset configuration
+						particles.set(particleIndex, prevParticle);
 					}
-				}
+				}*/
 				
 				//Print progress
 				if (i % printFreq == 0)
-					System.out.print("\r" + nf.format((i * 1.0 / numSteps)*100) + "%");
+					System.out.print("\r" + (int)((i * 1.0 / numSteps) * 100) + "%");
 			}
 			
+			//Log results
 			System.out.println("\nFinal energy = " + energy);
-			System.out.println("Final avg. energy = " + (energy / numParticles));
 			System.out.println("Acceptance rate = " + nf.format(acceptedSteps * 1.0 / numSteps));
 			
 			
 			calcRDF("end");
 			
 			
-			System.out.println("Finished.");
+			trjWriter.close();
+			
+			System.out.println("\nFinished.");
 			
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -144,7 +171,7 @@ public class LJMC {
 		
 		//Get particle positions randomly
 		for (int i = 0; i < numParticles; i++) {
-			double[] pos = new double[3];		
+			double[] pos = new double[numDim];		
 			for (int j = 0; j < pos.length; j++)
 				pos[j] = rand.nextDouble() * boxLength;
 			particles.add(pos);
@@ -157,27 +184,52 @@ public class LJMC {
 	public static void initSystemFrequentlyDistributed() {
 		particles = new ArrayList<double[]>(numParticles);
 		
-		//Get number of partitions for the lowest perfect cube
-		int numPart = 2;
-        while (Math.pow(numPart, 3) < numParticles)
-            numPart = numPart + 1;
-
-        //Get particle positions by advancing an index
-        int[] index = {0, 0, 0};
-		for (int i = 0; i < numParticles; i++) {
-			
-			double[] pos = new double[3];		
-			for (int j = 0; j < pos.length; j++)
-				pos[j] = (index[j] + radius) * (boxLength / numPart);
-			particles.add(pos);
+		if (numDim == 3) {
+			//Get number of partitions for the lowest perfect cube
+			int numPart = 2;
+	        while (Math.pow(numPart, 3) < numParticles)
+	            numPart = numPart + 1;
 	
-			index[0] = index[0] + 1;
-			if (index[0] == numPart) {
-				index[0] = 0;
-				index[1] = index[1] + 1;
-				if (index[1] == numPart) {
-					index[1] = 0;
-					index[2] = index[2] + 1;
+	        //Get particle positions by advancing an index
+	        int[] index = {0, 0, 0};
+			for (int i = 0; i < numParticles; i++) {
+				
+				double[] pos = new double[numDim];		
+				for (int j = 0; j < pos.length; j++)
+					pos[j] = (index[j] + radius) * (boxLength / numPart);
+				particles.add(pos);
+		
+				index[0] = index[0] + 1;
+				if (index[0] == numPart) {
+					index[0] = 0;
+					index[1] = index[1] + 1;
+					if (index[1] == numPart) {
+						index[1] = 0;
+						index[2] = index[2] + 1;
+					}
+				}
+			}
+		}
+		
+		if (numDim == 2) {
+			//Get number of partitions for the lowest perfect cube
+			int numPart = 2;
+	        while (Math.pow(numPart, 2) < numParticles)
+	            numPart = numPart + 1;
+	
+	        //Get particle positions by advancing an index
+	        int[] index = {0, 0};
+			for (int i = 0; i < numParticles; i++) {
+				
+				double[] pos = new double[numDim];		
+				for (int j = 0; j < pos.length; j++)
+					pos[j] = (index[j] + radius) * (boxLength / numPart);
+				particles.add(pos);
+		
+				index[0] = index[0] + 1;
+				if (index[0] == numPart) {
+					index[0] = 0;
+					index[1] = index[1] + 1;
 				}
 			}
 		}
@@ -188,31 +240,40 @@ public class LJMC {
 	 */
 	public static void moveParticle(int p) {
 		
-		particles.get(p)[0] += rand.nextDouble() * 2 - 1;
-		particles.get(p)[1] += rand.nextDouble() * 2 - 1;
-		particles.get(p)[2] += rand.nextDouble() * 2 - 1;
+		if (numDim == 3) {
+			particles.get(p)[0] += rand.nextDouble() * 2 - 1;
+			particles.get(p)[1] += rand.nextDouble() * 2 - 1;
+			particles.get(p)[2] += rand.nextDouble() * 2 - 1;
+			
+			if (particles.get(p)[0] > boxLength) particles.get(p)[0] -= boxLength;
+			if (particles.get(p)[0] < 0) particles.get(p)[0] += boxLength;
+			if (particles.get(p)[1] > boxLength) particles.get(p)[1] -= boxLength;
+			if (particles.get(p)[1] < 0) particles.get(p)[1] += boxLength;
+			if (particles.get(p)[2] > boxLength) particles.get(p)[2] -= boxLength;
+			if (particles.get(p)[2] < 0) particles.get(p)[2] += boxLength;
+		}
 		
-		if (particles.get(p)[0] > boxLength) particles.get(p)[0] -= boxLength;
-		if (particles.get(p)[0] < 0) particles.get(p)[0] += boxLength;
-		if (particles.get(p)[1] > boxLength) particles.get(p)[1] -= boxLength;
-		if (particles.get(p)[1] < 0) particles.get(p)[1] += boxLength;
-		if (particles.get(p)[2] > boxLength) particles.get(p)[2] -= boxLength;
-		if (particles.get(p)[2] < 0) particles.get(p)[2] += boxLength;
+		if (numDim == 2) {
+			particles.get(p)[0] += rand.nextDouble() * 2 - 1;
+			particles.get(p)[1] += rand.nextDouble() * 2 - 1;
+			
+			if (particles.get(p)[0] > boxLength) particles.get(p)[0] -= boxLength;
+			if (particles.get(p)[0] < 0) particles.get(p)[0] += boxLength;
+			if (particles.get(p)[1] > boxLength) particles.get(p)[1] -= boxLength;
+			if (particles.get(p)[1] < 0) particles.get(p)[1] += boxLength;
+		}
 	}
 
 	/**
 	 * Calculates the energy of the system.
 	 */
 	public static double calcEnergySystem() {
-		double energy = 0.0;
-		for (int i = 0; i < (numParticles-1); i++) {
-			for (int j = i + 1; j < numParticles; j++) {
-				double distSq = calcSquaredDistance(i, j);
-				if (distSq <= truncSq)
-					energy += 4 * epsilon * (  Math.pow(sigma / distSq, 6)) - (Math.pow(sigma / distSq, 3)  );
-			}
-		}
-		return energy;
+		double energySystem = 0.0;
+		
+		for (int i = 0; i < numParticles; i++)
+			energySystem += calcEnergyParticle(i);
+		
+		return 0.5 * energySystem;
 	}
 
 	/**
@@ -220,41 +281,65 @@ public class LJMC {
 	 */
 	public static double calcEnergyParticle(int p) {
 		double energyParticle = 0.0;
+		
 		for (int j = 0; j < numParticles; j++) {
 			if (j != p) {
-				double distSq = calcSquaredDistance(p, j);
-				if (distSq <= truncSq)
-					energyParticle += 4 * epsilon * (  Math.pow(sigma / distSq, 6)) - (Math.pow(sigma / distSq, 3)  );
+				double dist = calcDist(p, j);
+				if (dist <= trunc)
+					energyParticle += calcLJPotential(dist);
 			}
 		}
+		
 		return energyParticle;
 	}
 	
 	/**
-	 * Calculates the squared distance between two particles,
-	 * restricting to the minimum image ("wrapping distances").
+	 * Calculates the Lennard-Jones potential for a given distance.
+	 * U(r) = 4 * epsilon * [ (sigma/r)^12 - (sigma/r)^6 ]
 	 */
-	public static double calcSquaredDistance(int i, int j) {
-		double[] p1 = particles.get(i);
-		double[] p2 = particles.get(j);
-		double dx = p1[0] - p2[0];
-		double dy = p1[1] - p2[1];
-		double dz = p1[2] - p2[2];
-		if (dx >  boxLength/2) dx -= boxLength;
-		if (dx < -boxLength/2) dx += boxLength;
-		if (dy >  boxLength/2) dy -= boxLength;
-		if (dy < -boxLength/2) dy += boxLength;
-		if (dz >  boxLength/2) dz -= boxLength;
-		if (dz < -boxLength/2) dz += boxLength;
-		return Math.pow(dx, 2) + Math.pow(dy, 2)  + Math.pow(dz, 2);
+	public static double calcLJPotential(double dist) {
+		
+		return 4.0 * epsilon * (  Math.pow(sigma / dist, 12) - Math.pow(sigma / dist, 6)  );
 	}
 	
 	/**
 	 * Calculates the distance between two particles,
 	 * restricting to the minimum image ("wrapping distances").
 	 */
-	public static double calcDistance(int i, int j) {
-		return Math.sqrt(calcSquaredDistance(i, j));
+	public static double calcDist(int i, int j) {
+		double dist = 0.0;
+		
+		double[] p1 = particles.get(i);
+		double[] p2 = particles.get(j);
+		
+		if (numDim == 3) {
+			double dx = p1[0] - p2[0];
+			double dy = p1[1] - p2[1];
+			double dz = p1[2] - p2[2];
+			
+			if (dx >  boxLength/2) dx -= boxLength;
+			if (dx < -boxLength/2) dx += boxLength;
+			if (dy >  boxLength/2) dy -= boxLength;
+			if (dy < -boxLength/2) dy += boxLength;
+			if (dz >  boxLength/2) dz -= boxLength;
+			if (dz < -boxLength/2) dz += boxLength;
+			
+			dist = Math.sqrt(Math.pow(dx, 2) + Math.pow(dy, 2)  + Math.pow(dz, 2));
+		}
+		
+		if (numDim == 2) {
+			double dx = p1[0] - p2[0];
+			double dy = p1[1] - p2[1];
+			
+			if (dx >  boxLength/2) dx -= boxLength;
+			if (dx < -boxLength/2) dx += boxLength;
+			if (dy >  boxLength/2) dy -= boxLength;
+			if (dy < -boxLength/2) dy += boxLength;
+			
+			dist = Math.sqrt(Math.pow(dx, 2) + Math.pow(dy, 2));
+		}
+		
+		return dist;
 	}
 	
 	public static void writeTrajectory() {
@@ -268,8 +353,14 @@ public class LJMC {
 			
 			//Write system to file
 			trjWriter.write("\ntimestep ordered\n");
-			for (double[] x : particles) 
-				trjWriter.write(x[0] + " " + x[1] + " " + x[2] + "\n");
+			for (double[] p : particles) { 
+				if (numDim == 3)
+					trjWriter.write(p[0] + " " + p[1] + " " + p[2] + "\n");
+				if (numDim == 2)
+					trjWriter.write(p[0] + " " + p[1] + " 0.0\n");
+			}
+			
+			trjWriter.flush();
 			
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -281,13 +372,13 @@ public class LJMC {
 	 */
 	public static void calcRDF(String plotLabel) {
 		
-		int numBins = 200;
-		double max = 0.5 * boxLength;
+		int numBins = 100;
+		double max = boxLength;
 		double[] hist = new double[numBins];
 		double binSize = max / numBins;
 		for (int i = 0; i < (numParticles - 1); i++)  {
         	for (int j = i + 1; j < numParticles; j++) {
-        		double r = calcDistance(i, j);
+        		double r = calcDist(i, j);
         		if (r < max) {
         			int bin = (int) (r / binSize);
         			if ((bin >= 0) && (bin < numBins))
