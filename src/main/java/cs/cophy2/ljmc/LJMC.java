@@ -37,6 +37,7 @@ public class LJMC {
 	public static double density;
 	public static double beta;
 	public static double boxVolume;
+	public static double displ;
 	
 	public static List<Double> energies;
 	
@@ -63,24 +64,25 @@ public class LJMC {
 			
 			//Parameters
 			numDim = 3;
-			numParticles = 100;
-			epsilon = 5.0;							
+			numParticles = 128;
+			epsilon = 1.0;							
 			sigma = 1.0;
-			temp = 1.0;
-			density = 0.2;
-			numEqSteps = 100000;
+			temp = 0.9;
+			density = 0.7;
+			numEqSteps = 1000000;
 			numSampSteps = 100000;
+			displ = 0.25;
 			
 			//Calculated parameters
 			boxVolume = numParticles / density;
 			boxLength = Math.pow(boxVolume, 1.0 / numDim);
-			cutoff = 2.5 * sigma;
+			cutoff = 3.0 * sigma;
 			beta = 1.0 / temp;
 			radius = 0.5 * sigma;
 			numTotalSteps = numEqSteps + numSampSteps;
 			
 			//Output parameters
-			printProgressFreq = 100;
+			printProgressFreq = 10000;
 			writeTrjFreq = 100;
 			
 			//Log parameters
@@ -105,7 +107,7 @@ public class LJMC {
 			//Init sampling quantities
 			double energySum = 0.0;
 			double virialSum = 0.0;
-			//int acceptCounter = 0;	//TODO Klären ob ich das machen soll !?
+			int acceptCounter = 0;
 			
 			//Metropolis algorithm
 			for (int step = 0; step < numTotalSteps; step++) {
@@ -131,7 +133,7 @@ public class LJMC {
 				if ((deltaParticleEnergy < 0) || (rand.nextDouble() < Math.exp(-beta * deltaParticleEnergy))) {
 					energy += deltaParticleEnergy;
 					virial += newParticleVirial - prevParticleVirial;
-//					++acceptCounter;
+					++acceptCounter;
 					
 					if (step % writeTrjFreq == 0)
 						writeTrajectory();
@@ -140,10 +142,14 @@ public class LJMC {
 					particles.set(particleIndex, prevParticle);
 				}
 				
-				//Collect values for sampling
-				if (step > numEqSteps) {
-					energySum += energy;
-					virialSum += virial;
+				energySum += energy;
+				virialSum += virial;
+				
+				//Reset for sampling
+				if (step == numEqSteps) {
+					energySum = 0.0;
+					virialSum = 0.0;
+					acceptCounter = 0;
 				}
 				
 				//Print progress
@@ -151,6 +157,28 @@ public class LJMC {
 					System.out.println("Running " + (step < numEqSteps ? "equilibration" : "sampling")
 							+ " [ " + (int)((step * 1.0 / numTotalSteps) * 100) + "% ]");
 			}
+			
+			
+			/* TODO
+			 * 
+			 * Die finale total energy sollte knapp unter 0 sein.
+			 * ---> Wieso bin ich hier sooo weit im negativen?
+			 * 
+			 * Look into a better way on how to restore old positions
+			 * 
+			 * 
+			 * Der pressure scheint zu passen.
+			 * 
+			 * 
+			 * Mehrere Plots zur RDF machen in Abhängigkeit von verschiedenen T.
+			 * 
+			 * 
+			 */
+			
+			
+			
+			
+			
 			
 			//Calc and log results
 			double avgEnergy = energySum / numSampSteps;
@@ -160,17 +188,17 @@ public class LJMC {
 		    if (numDim == 3)
 		    	pressureTailCorr = (16.0 / 3.0) * Math.PI * Math.pow(density, 2) * epsilon * Math.pow(sigma, 3) * (  (2.0/3.0) * Math.pow(sigma / cutoff, 9) - Math.pow(sigma / cutoff, 3)  );
 		    double pressure = virialSum / 3.0 / numSampSteps / boxVolume + density * temp + pressureTailCorr;
-//		    double finalAcceptRate = acceptCounter * 1.0 / numSampSteps * 100.0;
-			System.out.println("\nAvg. energy = " + nf.format(avgEnergy));
+		    double finalAcceptRate = acceptCounter * 1.0 / numSampSteps * 100.0;
+		    System.out.println("\nAvg. energy = " + nf.format(avgEnergy));
 			System.out.println("Avg. particle energy = " + nf.format(avgParticleEnergy));
 			System.out.println("Avg. virial = " + nf.format(finalVirial));
 			System.out.println("Avg. pressure = " + nf.format(pressure));
-//			System.out.println("Avg. accpetance rate = " + nf.format(finalAcceptRate) + "%");
+			System.out.println("Acceptance rate = " + nf.format(finalAcceptRate));
 		    
 			//Plotting
 			plotRadialDistribution();
 			plot2DSystemPeriodic();
-			plotEnergies();
+			plotEnergyEvolution();
 			
 			trjWriter.close();
 			System.out.println("\nFinished.");
@@ -257,28 +285,28 @@ public class LJMC {
 	 */
 	public static void moveParticle(int p) {
 		
-		if (numDim == 3) {
-			particles.get(p)[0] += rand.nextDouble() * 2 - 1;
-			particles.get(p)[1] += rand.nextDouble() * 2 - 1;
-			particles.get(p)[2] += rand.nextDouble() * 2 - 1;
-			
-			if (particles.get(p)[0] > boxLength) particles.get(p)[0] -= boxLength;
-			if (particles.get(p)[0] < 0) particles.get(p)[0] += boxLength;
-			if (particles.get(p)[1] > boxLength) particles.get(p)[1] -= boxLength;
-			if (particles.get(p)[1] < 0) particles.get(p)[1] += boxLength;
-			if (particles.get(p)[2] > boxLength) particles.get(p)[2] -= boxLength;
-			if (particles.get(p)[2] < 0) particles.get(p)[2] += boxLength;
-		}
+		//x
+		particles.get(p)[0] += (rand.nextDouble() - 0.5) * displ;
+		if (particles.get(p)[0] >= boxLength)
+			particles.get(p)[0] -= boxLength;
+		if (particles.get(p)[0] < 0.0)
+			particles.get(p)[0] += boxLength;
 		
-		if (numDim == 2) {
-			particles.get(p)[0] += rand.nextDouble() * 2 - 1;
-			particles.get(p)[1] += rand.nextDouble() * 2 - 1;
-			
-			if (particles.get(p)[0] > boxLength) particles.get(p)[0] -= boxLength;
-			if (particles.get(p)[0] < 0) particles.get(p)[0] += boxLength;
-			if (particles.get(p)[1] > boxLength) particles.get(p)[1] -= boxLength;
-			if (particles.get(p)[1] < 0) particles.get(p)[1] += boxLength;
-		}
+		//y
+		particles.get(p)[1] += (rand.nextDouble() - 0.5) * displ;
+		if (particles.get(p)[1] >= boxLength)
+			particles.get(p)[1] -= boxLength;
+		if (particles.get(p)[1] < 0.0)
+			particles.get(p)[1] += boxLength;
+		
+		//z
+		if (numDim == 3) {
+			particles.get(p)[2] += (rand.nextDouble() - 0.5) * displ;
+			if (particles.get(p)[2] >= boxLength)
+				particles.get(p)[2] -= boxLength;
+			if (particles.get(p)[2] < 0.0)
+				particles.get(p)[2] += boxLength;
+			}
 	}
 
 	/**
@@ -394,7 +422,7 @@ public class LJMC {
 			if (dz >  boxLength/2) dz -= boxLength;
 			if (dz < -boxLength/2) dz += boxLength;
 			
-			dist = Math.sqrt(Math.pow(dx, 2) + Math.pow(dy, 2)  + Math.pow(dz, 2));
+			dist = Math.sqrt(Math.pow(dx, 2) + Math.pow(dy, 2) + Math.pow(dz, 2));
 		}
 		
 		if (numDim == 2) {
@@ -540,7 +568,7 @@ public class LJMC {
 	/**
 	 * Plots the evolution of the total energy throughout the simulation.
 	 */
-	public static void plotEnergies() {
+	public static void plotEnergyEvolution() {
 		@SuppressWarnings("unchecked")
 		DataTable data = new DataTable(Integer.class, Double.class);
 		for (int i = 0; i < energies.size(); i += 100 )
