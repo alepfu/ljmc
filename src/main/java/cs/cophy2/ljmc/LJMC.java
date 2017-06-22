@@ -5,6 +5,7 @@ import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.FileWriter;
+import java.io.IOException;
 import java.text.DecimalFormat;
 import java.text.NumberFormat;
 import java.util.ArrayList;
@@ -38,8 +39,7 @@ public class LJMC {
 	public static double beta;
 	public static double boxVolume;
 	public static double displ;
-	
-	public static List<Double> energies;
+	public static double cutoffFactor;
 	
 	public static int printProgressFreq;
 	public static int writeTrjFreq;
@@ -51,161 +51,196 @@ public class LJMC {
 	public static String outSuffix = "";
 	public static BufferedWriter trjWriter;
 	
+	public static void main(String[] args) {
+		
+		//verifyWithJohsonEtAl();
+		
+		//RDF runs
+		/*run(0.5, 0.5, 2.5);
+		run(0.5, 1.0, 2.5);
+		run(0.5, 2.0, 2.5);
+		run(0.5, 5.0, 2.5);*/
+		
+		//Trj runs
+		run(0.2, 1.0, 2.5);
+	}
+	
+	/**
+	 * Verify with results from Johnson et al.
+	 */
+	public static void verifyWithJohsonEtAl() {
+		double[][] paramTable = {{0.5, 5.0, 4.0}, //density, temp, cutoff/sigma
+				 {0.1, 2.0, 5.0},
+				 {0.2, 2.0, 5.0},
+				 {0.4, 2.0, 5.0},
+				 {0.5, 2.0, 5.0},
+				 {0.6, 2.0, 4.71},
+				 {0.7, 2.0, 4.47},
+				 {0.8, 2.0, 4.27},
+				 {0.9, 2.0, 4.11},
+				 {0.1, 1.2, 4.0},
+				 {0.1, 1.15, 4.0},
+				 {0.05, 1.0, 5.0},
+				 {0.6, 1.0, 4.71},
+				 {0.7, 1.0, 4.47},
+				 {0.8, 1.0, 4.27},
+				 {0.8, 1.0, 4.0},
+				 {0.9, 1.0, 4.11}};
+		try {
+			BufferedWriter resultsWriter = new BufferedWriter(new FileWriter(outDir + "/results.txt"));
+			
+			for (int i = 0; i < paramTable.length; i++) {
+				String result = run(paramTable[i][0], paramTable[i][1], paramTable[i][2]);
+				log(result);
+				resultsWriter.write(result + "\n");
+			}
+			
+			resultsWriter.flush();
+			resultsWriter.close();
+			
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+	}
+	
 	/**
 	 * Monte Carlo simulation of Lennard-Jones Particles.
 	 */
-	public static void main(String[] args) {
+	public static String run(double param1, double param2, double param3) {
 		
 		nf.setMaximumFractionDigits(4);
 		nf.setMinimumFractionDigits(4);
-		energies = new ArrayList<Double>();
+		trjWriter = null;
+
+		//Input parameters
+		density = param1;
+		temp = param2;
+		cutoffFactor = param3;
 		
-		try {
+		//Simulation parameters
+		numDim = 3;
+		numParticles = 50;
+		epsilon = 5.0;							
+		sigma = 1.0;
+		numEqSteps = 1000000;
+		numSampSteps = 1000000;
+		displ = 0.5;
+		
+		//Calculated parameters
+		boxVolume = numParticles / density;
+		boxLength = Math.pow(boxVolume, 1.0 / numDim);
+		cutoff = cutoffFactor * sigma;
+		beta = 1.0 / temp;
+		radius = 0.5 * sigma;
+		numTotalSteps = numEqSteps + numSampSteps;
+		
+		//Output parameters
+		printProgressFreq = 100;
+		writeTrjFreq = 100;
+		
+		//Log parameters
+		log("Num. dimensions = " + numDim);
+		log("Num. particles = " + numParticles);
+		log("Epsilon = " + nf.format(epsilon));
+		log("Sigma = " + nf.format(sigma));
+		log("Cutoff = " + nf.format(cutoff));
+		log("Temperature = " + nf.format(temp));
+		log("Density = " + nf.format(density));
+		log("Box volume = " + nf.format(boxVolume));
+		log("Box length = " + nf.format(boxLength) + "\n");
+		
+		//Initialize system
+		initSystemFrequentlyDistributed();
+		
+		writeTrajectory();
+		
+		//Calc initial energy and virial
+		double energy = calcEnergyTotal();
+		double virial = calcVirialTotal();
+		
+		//Init sampling quantities
+		double energySum = 0.0;
+		double virialSum = 0.0;
+		int acceptCounter = 0;
+		
+		//Metropolis algorithm
+		for (int step = 0; step < numTotalSteps; step++) {
 			
-			//Parameters
-			numDim = 3;
-			numParticles = 128;
-			epsilon = 1.0;							
-			sigma = 1.0;
-			temp = 0.9;
-			density = 0.7;
-			numEqSteps = 1000000;
-			numSampSteps = 100000;
-			displ = 0.25;
+			//Choose a particle at random and calculate its energy and virial
+			int particleIndex = rand.nextInt(numParticles);
+			double prevParticleEnergy = calcEnergyParticle(particleIndex);
+			double prevParticleVirial = calcVirialParticle(particleIndex);
 			
-			//Calculated parameters
-			boxVolume = numParticles / density;
-			boxLength = Math.pow(boxVolume, 1.0 / numDim);
-			cutoff = 3.0 * sigma;
-			beta = 1.0 / temp;
-			radius = 0.5 * sigma;
-			numTotalSteps = numEqSteps + numSampSteps;
+			//Move the choosen particle and calculate the new energy and virial
+			double[] prevParticle = new double[numDim];
+			for (int j = 0; j < prevParticle.length; j++)
+				prevParticle[j] = particles.get(particleIndex)[j];
+			moveParticle(particleIndex);
+			double newParticleEnergy = calcEnergyParticle(particleIndex);
+			double newParticleVirial = calcVirialParticle(particleIndex);
 			
-			//Output parameters
-			printProgressFreq = 10000;
-			writeTrjFreq = 100;
-			
-			//Log parameters
-			System.out.println("Num. dimensions = " + numDim);
-			System.out.println("Num. particles = " + numParticles);
-			System.out.println("Epsilon = " + nf.format(epsilon));
-			System.out.println("Sigma = " + nf.format(sigma));
-			System.out.println("Cutoff = " + nf.format(cutoff));
-			System.out.println("Temperature = " + nf.format(temp));
-			System.out.println("Density = " + nf.format(density));
-			System.out.println("Box volume = " + nf.format(boxVolume));
-			System.out.println("Box length = " + nf.format(boxLength) + "\n");
-			
-			//Initialize system
-			initSystemFrequentlyDistributed();
-			writeTrajectory();
-			
-			//Calc initial energy and virial
-			double energy = calcEnergyTotal();
-			double virial = calcVirialTotal();
-			
-			//Init sampling quantities
-			double energySum = 0.0;
-			double virialSum = 0.0;
-			int acceptCounter = 0;
-			
-			//Metropolis algorithm
-			for (int step = 0; step < numTotalSteps; step++) {
+			//Acceptance rule
+			double deltaParticleEnergy = newParticleEnergy - prevParticleEnergy;
+			if ((deltaParticleEnergy < 0) || (rand.nextDouble() < Math.exp(-beta * deltaParticleEnergy))) {
 				
-				//Collect values for plotting
-				energies.add(energy);
+				//Accept move
+				energy += deltaParticleEnergy;
+				virial += newParticleVirial - prevParticleVirial;
+				++acceptCounter;
 				
-				//Choose a particle at random and calculate its energy and virial
-				int particleIndex = rand.nextInt(numParticles);
-				double prevParticleEnergy = calcEnergyParticle(particleIndex);
-				double prevParticleVirial = calcVirialParticle(particleIndex);
+				if (step % writeTrjFreq == 0)
+					writeTrajectory();
 				
-				//Move the choosen particle and calculate the new energy and virial
-				double[] prevParticle = new double[numDim];
+			} else {
+				
+				//Restore old configuration
 				for (int j = 0; j < prevParticle.length; j++)
-					prevParticle[j] = particles.get(particleIndex)[j];
-				moveParticle(particleIndex);
-				double newParticleEnergy = calcEnergyParticle(particleIndex);
-				double newParticleVirial = calcVirialParticle(particleIndex);
-				
-				//Acceptance
-				double deltaParticleEnergy = newParticleEnergy - prevParticleEnergy;
-				if ((deltaParticleEnergy < 0) || (rand.nextDouble() < Math.exp(-beta * deltaParticleEnergy))) {
-					energy += deltaParticleEnergy;
-					virial += newParticleVirial - prevParticleVirial;
-					++acceptCounter;
-					
-					if (step % writeTrjFreq == 0)
-						writeTrajectory();
-					
-				} else {
-					particles.set(particleIndex, prevParticle);
-				}
-				
-				energySum += energy;
-				virialSum += virial;
-				
-				//Reset for sampling
-				if (step == numEqSteps) {
-					energySum = 0.0;
-					virialSum = 0.0;
-					acceptCounter = 0;
-				}
-				
-				//Print progress
-				if (step % printProgressFreq == 0)
-					System.out.println("Running " + (step < numEqSteps ? "equilibration" : "sampling")
-							+ " [ " + (int)((step * 1.0 / numTotalSteps) * 100) + "% ]");
+					particles.get(particleIndex)[j] = prevParticle[j];
 			}
 			
+			energySum += energy;
+			virialSum += virial;
 			
-			/* TODO
-			 * 
-			 * Die finale total energy sollte knapp unter 0 sein.
-			 * ---> Wieso bin ich hier sooo weit im negativen?
-			 * 
-			 * Look into a better way on how to restore old positions
-			 * 
-			 * 
-			 * Der pressure scheint zu passen.
-			 * 
-			 * 
-			 * Mehrere Plots zur RDF machen in Abhängigkeit von verschiedenen T.
-			 * 
-			 * 
-			 */
+			//Reset for sampling
+			if (step == numEqSteps) {
+				energySum = 0.0;
+				virialSum = 0.0;
+				acceptCounter = 0;
+			}
 			
-			
-			
-			
-			
-			
-			//Calc and log results
-			double avgEnergy = energySum / numSampSteps;
-		    double avgParticleEnergy = avgEnergy / numParticles;
-		    double finalVirial = virialSum / 3.0 / numSampSteps / boxVolume;
-		    double pressureTailCorr = 0.0;
-		    if (numDim == 3)
-		    	pressureTailCorr = (16.0 / 3.0) * Math.PI * Math.pow(density, 2) * epsilon * Math.pow(sigma, 3) * (  (2.0/3.0) * Math.pow(sigma / cutoff, 9) - Math.pow(sigma / cutoff, 3)  );
-		    double pressure = virialSum / 3.0 / numSampSteps / boxVolume + density * temp + pressureTailCorr;
-		    double finalAcceptRate = acceptCounter * 1.0 / numSampSteps * 100.0;
-		    System.out.println("\nAvg. energy = " + nf.format(avgEnergy));
-			System.out.println("Avg. particle energy = " + nf.format(avgParticleEnergy));
-			System.out.println("Avg. virial = " + nf.format(finalVirial));
-			System.out.println("Avg. pressure = " + nf.format(pressure));
-			System.out.println("Acceptance rate = " + nf.format(finalAcceptRate));
-		    
-			//Plotting
-			plotRadialDistribution();
-			plot2DSystemPeriodic();
-			plotEnergyEvolution();
-			
+			//Print progress
+			if (step % printProgressFreq == 0)
+				log("Running " + (step < numEqSteps ? "equilibration" : "sampling")
+						+ " [ " + (int)((step * 1.0 / numTotalSteps) * 100) + "% ]");
+		}
+		
+		//Calc and log results
+	    double avgEnergy = energySum / numSampSteps / numParticles;
+	    double pressureTailCorr = 0.0;
+	    if (numDim == 3)
+	    	pressureTailCorr = (16.0 / 3.0) * Math.PI * Math.pow(density, 2) * epsilon * Math.pow(sigma, 3) * (  (2.0/3.0) * Math.pow(sigma / cutoff, 9) - Math.pow(sigma / cutoff, 3)  );
+	    double pressure = virialSum / 3.0 / numSampSteps / boxVolume + density * temp + pressureTailCorr;
+	    double finalAcceptRate = acceptCounter * 1.0 / numSampSteps * 100.0;
+		log("Avg. energy = " + nf.format(avgEnergy));
+		log("Avg. pressure = " + nf.format(pressure));
+		log("Acceptance rate = " + nf.format(finalAcceptRate));
+	    
+	    //Result line for verification with paper
+	    String resultLine = density + "|" + temp + "|" + nf.format(pressure) + "|" + nf.format(avgEnergy) + "|" + cutoffFactor + "|" + nf.format(finalAcceptRate);
+	    
+	    writeRDFToFile();
+	    
+		//Plotting
+//		plotRDF();
+//		plot2DSystemPeriodic();
+
+		try {
 			trjWriter.close();
-			System.out.println("\nFinished.");
-			
-		} catch (Exception e) {
+		} catch (IOException e) {
 			e.printStackTrace();
 		}
+
+		return resultLine; 
 	}
 	
 	/**
@@ -306,7 +341,7 @@ public class LJMC {
 				particles.get(p)[2] -= boxLength;
 			if (particles.get(p)[2] < 0.0)
 				particles.get(p)[2] += boxLength;
-			}
+		}
 	}
 
 	/**
@@ -447,7 +482,7 @@ public class LJMC {
 		try {
 			//Initialize writer and write header information
 			if (trjWriter == null) {
-				trjWriter =  new BufferedWriter(new FileWriter(outDir + "/ljmc.vtf"));
+				trjWriter =  new BufferedWriter(new FileWriter(outDir + "/trj_" + temp + ".vtf"));
 				trjWriter.write("pbc " + boxLength + " " + boxLength + " " + boxLength +"\n" + 
 						   "atom 0:" + (numParticles-1) + " radius " + radius + " name O type 0\n");
 			}
@@ -471,10 +506,10 @@ public class LJMC {
 	/**
 	 * Calculates a histogram and exports a plot for the radial distribution function.
 	 */
-	public static void plotRadialDistribution() {
+	public static void plotRDF() {
 		
 		int numBins = 100;
-		double max = 5.0 * sigma;  //0.5 * boxLength;
+		double max = 5.0 * sigma;
 		double[] hist = new double[numBins];
 		double binSize = max / numBins;
 		
@@ -530,6 +565,54 @@ public class LJMC {
 	}
 	
 	/**
+	 * Exports histogram from radial distribution to file.
+	 */
+	public static void writeRDFToFile() {
+		
+		int numBins = 100;
+		double max = 5.0 * sigma;
+		double[] hist = new double[numBins];
+		double binSize = max / numBins;
+		
+		for (int i = 0; i < (numParticles - 1); i++)  {
+        	for (int j = i + 1; j < numParticles; j++) {
+        		double r = calcDist(i, j);
+        		if (r < max) {
+        			int bin = (int) (r / binSize);
+        			if ((bin >= 0) && (bin < numBins))
+        				hist[bin] += 2;
+        		}
+        	}
+		}
+		
+		if (numDim == 3) {
+			for (int i = 0; i < numBins; i++) {
+				double vb = (Math.pow(i+1, 3) - Math.pow(i, 3)) * Math.pow(binSize, 3);
+				double nid = (4.0/3.0) * Math.PI * vb * density;
+				hist[i] = hist[i] / (numParticles * nid);
+			}
+		}
+		
+		if (numDim == 2) {
+			for (int i = 0; i < numBins; i++) {
+				double vb = (Math.pow(i+1, 2) - Math.pow(i, 2)) * Math.pow(binSize, 2);
+				double nid = Math.PI * vb * density;
+				hist[i] = hist[i] / (numParticles * nid);
+			}
+		}
+		
+		try {
+			BufferedWriter writer = new BufferedWriter(new FileWriter(outDir + "/rdf_" + temp + ".txt"));
+			for (int i = 0; i < numBins; i++)
+				writer.write(i * binSize + " " + hist[i] + "\n");
+			writer.flush();
+			writer.close();
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
+	}
+	
+	/**
 	 * Plots a 2D system with its periodic images.
 	 */
 	public static void plot2DSystemPeriodic() {
@@ -565,30 +648,8 @@ public class LJMC {
 		}
 	}
 	
-	/**
-	 * Plots the evolution of the total energy throughout the simulation.
-	 */
-	public static void plotEnergyEvolution() {
-		@SuppressWarnings("unchecked")
-		DataTable data = new DataTable(Integer.class, Double.class);
-		for (int i = 0; i < energies.size(); i += 100 )
-			data.add(i, energies.get(i));
-		
-		XYPlot plot = new XYPlot(data);
-		plot.setInsets(new Insets2D.Double(70.0, 70.0, 70.0, 70.0));
-		plot.setBackground(Color.WHITE);
-		 plot.getPointRenderers(data).get(0).setShape(null);
-		LineRenderer lines = new DefaultLineRenderer2D();
-        plot.setLineRenderers(data, lines);
-        
-        plot.getTitle().setText("Total Energy");
-		plot.getAxisRenderer(XYPlot.AXIS_X).getLabel().setText("Iteration");
-       
-		DrawableWriter writer = DrawableWriterFactory.getInstance().get("image/png");
-		try {
-			writer.write(plot, new FileOutputStream(new File(outDir + "/energy.png")), 800, 800);
-		} catch (Exception e) {
-			e.printStackTrace();
-		}
-}
+	public static void log(String s) {
+		System.out.println(s);
+	}
+	
 }
