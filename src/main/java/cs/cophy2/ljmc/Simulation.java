@@ -21,7 +21,7 @@ import de.erichseifert.gral.plots.lines.DefaultLineRenderer2D;
 import de.erichseifert.gral.plots.lines.LineRenderer;
 
 
-public class LJMC {
+public class Simulation {
 
 	public static int numDim;
 	public static int numParticles;			
@@ -62,7 +62,12 @@ public class LJMC {
 		run(0.5, 5.0, 2.5);*/
 		
 		//Trj runs
-		run(0.2, 1.0, 2.5);
+		//run(0.2, 1.0, 2.5);
+		
+		//density temp cutofffactor
+		
+		//Email
+		run(0.2, 1.0, 2.5);   //TODO work in progress
 	}
 	
 	/**
@@ -119,11 +124,11 @@ public class LJMC {
 		
 		//Simulation parameters
 		numDim = 3;
-		numParticles = 50;
-		epsilon = 5.0;							
+		numParticles = 100;					//TODO work in progress	
+		epsilon = 5.0;						//TODO work in progress		
 		sigma = 1.0;
-		numEqSteps = 1000000;
-		numSampSteps = 1000000;
+		numEqSteps = 100000;
+		numSampSteps = 100000;
 		displ = 0.5;
 		
 		//Calculated parameters
@@ -231,7 +236,7 @@ public class LJMC {
 	    writeRDFToFile();
 	    
 		//Plotting
-//		plotRDF();
+		plotRDF();
 //		plot2DSystemPeriodic();
 
 		try {
@@ -509,7 +514,7 @@ public class LJMC {
 	public static void plotRDF() {
 		
 		int numBins = 100;
-		double max = 5.0 * sigma;
+		double max = 0.5 * boxLength; 		//5.0 * sigma;		//TODO work in progress
 		double[] hist = new double[numBins];
 		double binSize = max / numBins;
 		
