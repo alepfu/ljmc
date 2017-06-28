@@ -67,9 +67,6 @@ public class LJMCSimulation {
 	 * Call run() method for running the simulation, evaluate results
 	 * via attributes avgEnergy, pressure and finalAcceptRate.
 	 * 
-	 * @param d The density.
-	 * @param t The temperature.
-	 * @param co The cutoff distance.
 	 */
 	public LJMCSimulation(double d, double t, double co, double eps, int n) {
 		
@@ -118,9 +115,6 @@ public class LJMCSimulation {
 		//Initialize system
 		initSystemFrequentlyDistributed();
 		
-		//Setup trajectory file and add initial configuration
-		writeTrajectory();
-		
 		//Calc initial energy and virial
 		double energy = calcEnergyTotal();
 		double virial = calcVirialTotal();
@@ -155,9 +149,6 @@ public class LJMCSimulation {
 				virial += newParticleVirial - prevParticleVirial;
 				++acceptCounter;
 				
-				if (step % writeTrjFreq == 0)
-					writeTrajectory();
-				
 			} else {
 				
 				//Restore old configuration
@@ -168,6 +159,9 @@ public class LJMCSimulation {
 			energySum += energy;
 			virialSum += virial;
 			
+			if (step % writeTrjFreq == 0)
+				writeTrajectory();
+			
 			//Reset sums/counter for sampling
 			if (step == numEqSteps) {
 				energySum = 0.0;
@@ -177,8 +171,7 @@ public class LJMCSimulation {
 			
 			//Print progress
 			if (step % printProgressFreq == 0)
-				log((step < numEqSteps ? "Equilibration" : "Sampling")
-						+ " [ " + (int)((step * 1.0 / numTotalSteps) * 100) + "% ]");
+				log((int)((step * 1.0 / numTotalSteps) * 100) + "% " + (step < numEqSteps ? "[Equilibration]" : "[Sampling]"));
 		}
 		
 		//Calc and log results
@@ -190,9 +183,8 @@ public class LJMCSimulation {
 		log("Avg. pressure = " + nf.format(pressure));
 		log("Acceptance rate = " + nf.format(finalAcceptRate));
 	    
-		//Write the last configuration and then close trajectory file
+		//Close trajectory file
 		try {
-			writeTrajectory();
 			trjWriter.close();
 		} catch (IOException e) {
 			e.printStackTrace();

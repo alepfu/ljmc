@@ -28,13 +28,14 @@ import de.erichseifert.gral.plots.lines.LineRenderer;
 public class RadialDistribution {
 
 	public int numParticles;
-	public List<double[]> particles;
+	public List<List<double[]>> configs;
 	public double density;
 	public double boxLength;
 	public int numBins;
-	double maxr;
-	double[] hist;
-	double binSize;
+	public double maxr;
+	public double binSize;
+	public int numConfigs; 
+	public List<double[]> hists;
 	
 	public static String workDir = "/home/alepfu/Desktop/LJMC";
 	
@@ -44,22 +45,36 @@ public class RadialDistribution {
 		density = d;
 		boxLength = bl;
 		
-		particles = new ArrayList<double[]>(np);
+		numConfigs = 100;
+		configs = new ArrayList<List<double[]>>();
+		hists = new ArrayList<double[]>();
+		
 		numBins = 100;
-		maxr = 0.5 * boxLength;
-		hist = new double[numBins];
+		maxr = 0.5 * boxLength;		
 		binSize = maxr / numBins;
 		
-		//Get final configuration from trajectory file
+		//Get configurations from trajectory file
         try {
 			BufferedReader br = new BufferedReader(new FileReader(workDir + "/trj.vtf"));
+			
 			String l;
 			List<String> lines = new ArrayList<String>();
 			while((l = br.readLine()) != null)
 				lines.add(l);
-			for(int i = lines.size()-1; i >= 0; i--) 
-				if (lines.get(i).equals("timestep ordered"))
-					break;
+			
+			List<double[]> particles = new ArrayList<double[]>();
+			
+			for(int i = lines.size() - 1, j = 0; i >= 0 && j < numConfigs; i--) {
+				
+				
+				
+				if (lines.get(i).equals("timestep ordered")) {
+					
+					configs.add(particles);
+					particles = new ArrayList<double[]>();
+					--i;
+					++j;
+				}
 				else {
 					double[] p = new double[3];
 					String[] split = lines.get(i).split("\\s+");
@@ -68,6 +83,8 @@ public class RadialDistribution {
 					p[2] = Double.parseDouble(split[2]);
 					particles.add(p);
 				}
+				
+			}
 			
 			br.close();
 		} catch (Exception e) {
@@ -76,48 +93,61 @@ public class RadialDistribution {
 	}
 	
 	/**
-	 * Calculates RDF and exports data to file.
+	 * Calculates RDF, exports data to file and generates a plot.
 	 */
 	public void run() {
 
-		//Calc histogram
-		for (int i = 0; i < (numParticles - 1); i++)  {
-        	for (int j = i + 1; j < numParticles; j++) {
-        		double r = calcDist(i, j);
-        		if (r < maxr) {
-        			int bin = (int) (r / binSize);
-        			if ((bin >= 0) && (bin < numBins))
-        				hist[bin] += 2;
-        		}
-        	}
+		for (List<double[]> config : configs) {
+		
+			double[] hist = new double[numBins];
+			
+			//Calc histogram
+			for (int i = 0; i < (numParticles - 1); i++)  {
+	        	for (int j = i + 1; j < numParticles; j++) {
+	        		double r = calcDist(i, j, config);
+	        		if (r < maxr) {
+	        			int bin = (int) (r / binSize);
+	        			if ((bin >= 0) && (bin < numBins))
+	        				hist[bin] += 2;
+	        		}
+	        	}
+			}
+			
+			for (int i = 0; i < numBins; i++) {
+				double vb = (Math.pow(i+1, 3) - Math.pow(i, 3)) * Math.pow(binSize, 3);
+				double nid = (4.0/3.0) * Math.PI * vb * density;
+				hist[i] = hist[i] / (numParticles * nid);
+			}
+			
+			hists.add(hist);
 		}
-		for (int i = 0; i < numBins; i++) {
-			double vb = (Math.pow(i+1, 3) - Math.pow(i, 3)) * Math.pow(binSize, 3);
-			double nid = (4.0/3.0) * Math.PI * vb * density;
-			hist[i] = hist[i] / (numParticles * nid);
-		}
+		
+		//Calc average over histograms
+		double[] sumHist = new double[numBins];
+		for (double[] hist : hists) 
+			for (int i = 0; i < numBins; i++) 
+				sumHist[i] += hist[i];
+		
+		double[] avgHist = new double[numBins];
+		for (int i = 0; i < numBins; i++) 
+			avgHist[i] = sumHist[i] / numConfigs;
 		
 		//Export to file
 		try {
 			BufferedWriter w = new BufferedWriter(new FileWriter(workDir + "/rdf.txt"));
 			for (int i = 0; i < numBins; i++)
-				w.write(i * binSize + " " + hist[i] + "\n");
+				w.write(i * binSize + " " + avgHist[i] + "\n");
 			w.flush();
 			w.close();
 		} catch (IOException e) {
 			e.printStackTrace();
 		}
-	}
-	
-	/**
-	 * Plots the RDF.
-	 */
-	public void plot() {
 		
+		//Plot
 		@SuppressWarnings("unchecked")
 		DataTable data = new DataTable(Double.class, Double.class);
-		for (int i = 0; i < numBins; i++)
-			data.add(i * binSize, hist[i]);
+		for (int i = 0; i < numBins; i++)							
+			data.add(i * binSize, avgHist[i]);					
 		XYPlot plot = new XYPlot(data);
 		plot.setInsets(new Insets2D.Double(70.0, 70.0, 70.0, 70.0));
 		plot.setBackground(Color.WHITE);
@@ -126,23 +156,25 @@ public class RadialDistribution {
         plot.setLineRenderers(data, lines);
         plot.getTitle().setText("Radial Distribution");
 		plot.getAxisRenderer(XYPlot.AXIS_X).getLabel().setText("r");
+		plot.getAxisRenderer(XYPlot.AXIS_X).setTickSpacing(1.0);
+		plot.getAxisRenderer(XYPlot.AXIS_Y).setTickSpacing(1.0);
+		//plot.getAxis(XYPlot.AXIS_Y).setRange(0, 8);
 		DrawableWriter writer = DrawableWriterFactory.getInstance().get("image/png");
 		try {
 			writer.write(plot, new FileOutputStream(new File(workDir + "/rdf.png")), 800, 800);
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
-		
 	}
 	
 	/**
 	 * Calculates the distance between two particles,
 	 * restricting to the minimum image ("wrapping distances").
 	 */
-	public double calcDist(int i, int j) {
+	public double calcDist(int i, int j, List<double[]> config) {
 
-		double[] p1 = particles.get(i);
-		double[] p2 = particles.get(j);
+		double[] p1 = config.get(i);
+		double[] p2 = config.get(j);
 		
 		double dx = p1[0] - p2[0];
 		double dy = p1[1] - p2[1];
