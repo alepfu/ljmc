@@ -45,11 +45,11 @@ public class Verification {
 			
 			for (int i = 0; i < paramTable.length; i++) {
 				
-				LJMCSimulation sim = new LJMCSimulation(paramTable[i][0], paramTable[i][1], paramTable[i][2], eps, n);
-				sim.run();
-
-				w.write(sim.density + " " + sim.temp + " " + sim.cutoff + " "
-						+ sim.pressure + " " + sim.avgEnergy + "\n");
+//				LJMCSimulation sim = new LJMCSimulation(paramTable[i][0], paramTable[i][1], paramTable[i][2], eps, n);
+//				sim.run();
+//
+//				w.write(sim.density + " " + sim.temp + " " + sim.cutoff + " "
+//						+ sim.pressure + " " + sim.avgEnergy + "\n");
 			}
 			
 			w.flush();
@@ -59,10 +59,6 @@ public class Verification {
 			e.printStackTrace();
 		}
 
-	}
-
-	public static void log(String s) {
-		System.out.println(s);
 	}
 	
 }

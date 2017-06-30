@@ -33,8 +33,16 @@ public class LJMCSimulation {
 	public double boxVolume;
 	public double displ;
 	
-	public int printProgressFreq;
-	public int writeTrjFreq;
+	public int numBins;
+	public double maxr;
+	public double binSize;
+	public double[] rdfSum;
+	
+	public int progressFreq;
+	public int trjFreq;
+	public int rdfFreq;
+	
+	public String label;
 	
 	public double avgEnergy;
 	public double pressure;
@@ -46,35 +54,21 @@ public class LJMCSimulation {
 	
 	public String workDir = "/home/alepfu/Desktop/LJMC";
 	
-	/**
-	 * Main method, use for testing purposes only.
-	 */
 	public static void main(String[] args) {
 		
-		double d = 0.2;
-		double t = 1.0;
-		double co = 2.5;
-		double eps = 5.0;
-		int n = 100;
+//		for (int i = 0; i < 20; i++)
+//			new LJMCSimulation(i+"");
 		
-		LJMCSimulation sim = new LJMCSimulation(d, t, co, eps, n);
-		sim.run();
-		
+		new LJMCSimulation("");
 	}
 	
-	/**
-	 * An instance of a Monte Carlo Lennard-Jones simulation.
-	 * Call run() method for running the simulation, evaluate results
-	 * via attributes avgEnergy, pressure and finalAcceptRate.
-	 * 
-	 */
-	public LJMCSimulation(double d, double t, double co, double eps, int n) {
+	public LJMCSimulation(String l) {
 		
-		density = d;
-		temp = t;
-		cutoff = co;
-		numParticles = n;						
-		epsilon = eps;
+		density = 0.05;
+		temp = 1.0;
+		cutoff = 2.5;
+		numParticles = 100;						
+		epsilon = 1.0;
 		
 		sigma = 1.0;
 		numEqSteps = 100000;
@@ -87,21 +81,22 @@ public class LJMCSimulation {
 		radius = 0.5 * sigma;
 		numTotalSteps = numEqSteps + numSampSteps;
 		
-		printProgressFreq = 1000;
-		writeTrjFreq = 100;
+		progressFreq = (int) (numTotalSteps * 0.01);
+		trjFreq = 100;
+		rdfFreq = 500;
+		
+		label = l;
+		
+		numBins = 100;
+		maxr = 0.5 * boxLength;
+		binSize = maxr / numBins;
+		rdfSum = new double[numBins];
 		
 		trjWriter = null;
 		rand = new Random();
 		nf = DecimalFormat.getInstance();
 		nf.setMaximumFractionDigits(4);
 		nf.setMinimumFractionDigits(4);
-		
-	}
-	
-	/**
-	 * Run the simulation with the given parameters from the constructor.
-	 */
-	public void run() {
 		
 		//Log parameters
 		log("Num. particles = " + numParticles);
@@ -123,6 +118,7 @@ public class LJMCSimulation {
 		double energySum = 0.0;
 		double virialSum = 0.0;
 		int acceptCounter = 0;
+		int rdfCounter = 0;
 		
 		//Metropolis algorithm
 		for (int step = 0; step < numTotalSteps; step++) {
@@ -159,30 +155,42 @@ public class LJMCSimulation {
 			energySum += energy;
 			virialSum += virial;
 			
-			if (step % writeTrjFreq == 0)
-				writeTrajectory();
-			
-			//Reset sums/counter for sampling
+			//Reset sums and counter for sampling
 			if (step == numEqSteps) {
 				energySum = 0.0;
 				virialSum = 0.0;
 				acceptCounter = 0;
 			}
 			
+			//Write trajectory to file
+			if (step % trjFreq == 0)
+				writeTrajectory();
+			
+			//Calc RDF
+			if ((step % rdfFreq == 0) && (step >= numEqSteps)) {
+				collectRDF();
+				++rdfCounter;
+			}
+				
 			//Print progress
-			if (step % printProgressFreq == 0)
+			if (step % progressFreq == 0)
 				log((int)((step * 1.0 / numTotalSteps) * 100) + "% " + (step < numEqSteps ? "[Equilibration]" : "[Sampling]"));
 		}
 		
-		//Calc and log results
+		//Calc results
 	    avgEnergy = energySum / numSampSteps / numParticles;
 	    double pressureTailCorr = (16.0 / 3.0) * Math.PI * Math.pow(density, 2) * epsilon * Math.pow(sigma, 3) * (  (2.0/3.0) * Math.pow(sigma / cutoff, 9) - Math.pow(sigma / cutoff, 3)  );
 	    pressure = virialSum / 3.0 / numSampSteps / boxVolume + density * temp + pressureTailCorr;
 	    finalAcceptRate = acceptCounter * 1.0 / numSampSteps * 100.0;
-		log("Avg. energy = " + nf.format(avgEnergy));
+		
+	    //Log results
+	    log("Avg. energy = " + nf.format(avgEnergy));
 		log("Avg. pressure = " + nf.format(pressure));
-		log("Acceptance rate = " + nf.format(finalAcceptRate));
+		log("Accept. rate = " + nf.format(finalAcceptRate));
 	    
+		//Output RDF to file
+		writeRDF(rdfCounter);
+		
 		//Close trajectory file
 		try {
 			trjWriter.close();
@@ -190,21 +198,6 @@ public class LJMCSimulation {
 			e.printStackTrace();
 		}
 
-	}
-	
-	/**
-	 * Initializes the system with randomly choosen positions.
-	 */
-	public void initSystemRandomlyDistributed() {
-		particles = new ArrayList<double[]>(numParticles);
-		
-		//Get particle positions randomly
-		for (int i = 0; i < numParticles; i++) {
-			double[] pos = new double[3];		
-			for (int j = 0; j < pos.length; j++)
-				pos[j] = rand.nextDouble() * boxLength;
-			particles.add(pos);
-		}
 	}
 	
 	/**
@@ -383,7 +376,7 @@ public class LJMCSimulation {
 		try {
 			//Initialize writer and write header information
 			if (trjWriter == null) {
-				trjWriter =  new BufferedWriter(new FileWriter(workDir + "/trj.vtf"));
+				trjWriter =  new BufferedWriter(new FileWriter(workDir + "/trj_" + label + ".vtf"));
 				trjWriter.write("pbc " + boxLength + " " + boxLength + " " + boxLength +"\n" + 
 						   "atom 0:" + (numParticles-1) + " radius " + radius + " name O type 0\n");
 			}
@@ -402,6 +395,54 @@ public class LJMCSimulation {
 	
 	public static void log(String s) {
 		System.out.println(s);
+	}
+	
+	/**
+	 * Calculates and collects values for the RDF.
+	 */
+	public void collectRDF() {
+		
+		double[] rdf = new double[numBins];
+		
+		for (int i = 0; i < (numParticles - 1); i++)  {
+        	for (int j = i + 1; j < numParticles; j++) {
+        		double r = calcDist(i, j);
+        		if (r < maxr) {
+        			int bin = (int) (r / binSize);
+        			if ((bin >= 0) && (bin < numBins))
+        				rdf[bin] += 2;
+        		}
+        	}
+		}
+		
+		for (int i = 0; i < numBins; i++) {
+			double vb = (Math.pow(i+1, 3) - Math.pow(i, 3)) * Math.pow(binSize, 3);
+			double nid = (4.0/3.0) * Math.PI * vb * density;
+			rdf[i] /= numParticles * nid;
+			
+			rdfSum[i] += rdf[i];
+		}
+		
+	}
+	
+	/**
+	 * Calculates the average RDF and writes the values to a file.
+	 */
+	public void writeRDF(int numCollectedRDFs) {
+		
+		try {
+			BufferedWriter w = new BufferedWriter(new FileWriter(workDir + "/rdf_" + label + ".csv"));
+			for (int i = 0; i < numBins; i++) {				
+				rdfSum[i] = rdfSum[i] / numCollectedRDFs;
+				w.write((i * binSize) + " " + rdfSum[i] + "\n");
+			}
+			
+			w.flush();
+			w.close();
+			
+		} catch (IOException e) {
+			e.printStackTrace();
+		}
 	}
 	
 }
