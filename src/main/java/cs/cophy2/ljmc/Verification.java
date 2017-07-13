@@ -15,7 +15,7 @@ public class Verification {
 
 	public static String workDir = "/home/alepfu/Desktop/LJMC";
 	
-	public static void main(String[] args) {
+	/*public static void main(String[] args) {
 		
 		//Parameters set of Johnson et al.
 		double[][] paramTable = {{0.5, 5.0, 4.0}, //density, temp, cutoff
@@ -45,11 +45,11 @@ public class Verification {
 			
 			for (int i = 0; i < paramTable.length; i++) {
 				
-//				LJMCSimulation sim = new LJMCSimulation(paramTable[i][0], paramTable[i][1], paramTable[i][2], eps, n);
-//				sim.run();
-//
-//				w.write(sim.density + " " + sim.temp + " " + sim.cutoff + " "
-//						+ sim.pressure + " " + sim.avgEnergy + "\n");
+				LJMCSimulation sim = new LJMCSimulation(paramTable[i][0], paramTable[i][1], paramTable[i][2], eps, n);
+				sim.run();
+
+				w.write(sim.density + " " + sim.temp + " " + sim.cutoff + " "
+						+ sim.pressure + " " + sim.avgEnergy + "\n");
 			}
 			
 			w.flush();
@@ -59,6 +59,6 @@ public class Verification {
 			e.printStackTrace();
 		}
 
-	}
+	}*/
 	
 }

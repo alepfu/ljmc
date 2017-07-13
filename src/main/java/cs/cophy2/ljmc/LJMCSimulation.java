@@ -56,21 +56,18 @@ public class LJMCSimulation {
 	
 	public static void main(String[] args) {
 		
-//		for (int i = 0; i < 20; i++)
-//			new LJMCSimulation(i+"");
-		
 		new LJMCSimulation("");
 	}
 	
 	public LJMCSimulation(String l) {
 		
-		density = 0.05;
+		density = 0.2;
 		temp = 1.0;
 		cutoff = 2.5;
 		numParticles = 100;						
 		epsilon = 1.0;
-		
 		sigma = 1.0;
+		
 		numEqSteps = 100000;
 		numSampSteps = 100000;
 		displ = 0.5;
